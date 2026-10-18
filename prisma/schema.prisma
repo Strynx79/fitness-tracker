@@ -1,0 +1,145 @@
+// Fitness & Self-Improvement OS — Slice 0 (Project Bootstrapping)
+// Postgres 18 via Docker Compose + Prisma ORM 7.
+// Multi-user-ready, auth-less for the MVP: every row is owned via userId, but
+// getCurrentUser() returns a single seeded dev user until Auth.js is added.
+
+generator client {
+  provider = "prisma-client" // not prisma-client-js (deprecated in v7)
+  output   = "../src/generated/prisma" // `output` is required in Prisma 7
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection string lives in prisma.config.ts (v7 canonical).
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+// Minimal, auth-less placeholder. Deliberately shaped like Auth.js's
+// AdapterUser (id/email/name/image) so adding auth later is purely additive.
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  name         String?
+  image        String?
+  timezone     String   @default("UTC") @db.VarChar(64) // IANA, e.g. "Asia/Kolkata"
+  goalWeightKg Decimal? @map("goal_weight_kg") @db.Decimal(5, 2)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  dailyMetrics    DailyMetric[]
+  habits          Habit[]
+  workoutSessions WorkoutSession[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Slice 1 — Daily metrics & macros
+// ---------------------------------------------------------------------------
+// One row per user per calendar day (user-local). All measurement columns are
+// nullable: a day can be "weighed only" or "macros only", and NULL means
+// "unknown" so averages/sums ignore it instead of being dragged toward 0.
+model DailyMetric {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  date      DateTime @db.Date
+  weightKg  Decimal? @map("weight_kg") @db.Decimal(5, 2)
+  calories  Int?
+  proteinG  Int?     @map("protein_g")
+  notes     String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One row per user per local day, and the index behind the 30-day trend.
+  // Requires userId NOT NULL: Postgres treats NULLs as distinct, so a nullable
+  // userId would let duplicate "anonymous" rows for the same date through.
+  @@unique([userId, date])
+  @@map("daily_metrics")
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2 — Habit engine
+// ---------------------------------------------------------------------------
+// Habit = the definition (created once, archived rather than deleted).
+model Habit {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  name        String    @db.VarChar(120)
+  description String?   @db.Text
+  sortOrder   Int       @default(0) @map("sort_order")
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs HabitLog[]
+
+  @@unique([userId, name]) // no two identical habits on one checklist
+  @@index([userId, archivedAt]) // "my active habits" checklist query
+  @@map("habits")
+}
+
+// HabitLog = the per-day completion fact, one row per habit per day.
+model HabitLog {
+  id        String   @id @default(cuid())
+  habitId   String   @map("habit_id")
+  date      DateTime @db.Date
+  completed Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  habit Habit @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  // Makes check/uncheck a single idempotent upsert. Also the only index this
+  // table needs: every read is habitId (+ date range) shaped.
+  @@unique([habitId, date])
+  @@map("habit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Slice 3 — Workout & progressive overload
+// ---------------------------------------------------------------------------
+model WorkoutSession {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  name        String    @db.VarChar(80) // "Push" | "Pull" | "Legs" | free text
+  notes       String?   @db.Text
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3) // NULL = in progress
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sets WorkoutSet[]
+
+  @@index([userId, startedAt]) // session history list
+  @@index([userId, completedAt]) // Slice 4 "last completed workout"
+  @@map("workout_sessions")
+}
+
+// No Exercise table yet: exerciseName is the display string, exerciseKey is the
+// canonical lookup key (trimmed, lowercased) so "Bench Press" and "bench press"
+// resolve to the same exercise. Promotable to a real table later without loss.
+model WorkoutSet {
+  id           String   @id @default(cuid())
+  sessionId    String   @map("session_id")
+  exerciseName String   @map("exercise_name") @db.VarChar(120)
+  exerciseKey  String   @map("exercise_key") @db.VarChar(120)
+  setNumber    Int      @map("set_number") // 1-based, per (session, exercise)
+  weightKg     Decimal  @default(0) @map("weight_kg") @db.Decimal(5, 2) // 0 = bodyweight
+  reps         Int
+  rpe          Decimal? @db.Decimal(3, 1) // 1.0–10.0 in 0.5 steps; NULL = unrated
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  session WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Idempotent "log a set" (safe on double-submit) + session detail reads.
+  @@unique([sessionId, exerciseKey, setNumber])
+  @@index([exerciseKey]) // per-exercise history / "previous top set"
+  @@map("workout_sets")
+}

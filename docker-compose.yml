@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: fitness-os-postgres
+    restart: unless-stopped
+    # Throwaway local-development credentials. Bound to loopback below, so this
+    # database is not reachable from the LAN or the Windows host.
+    environment:
+      POSTGRES_USER: fitness
+      POSTGRES_PASSWORD: fitness
+      POSTGRES_DB: fitness_os
+    ports:
+      - "127.0.0.1:5432:5432"
+    # Postgres 18 moved PGDATA from /var/lib/postgresql/data to
+    # /var/lib/postgresql/18/docker, so the named volume must be mounted on the
+    # PARENT directory. Mounting .../data (the pre-18 convention) leaves the real
+    # data directory on an anonymous volume, silently lost when the container is
+    # recreated.
+    volumes:
+      - fitness_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitness -d fitness_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  fitness_pgdata:

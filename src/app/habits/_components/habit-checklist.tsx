@@ -31,9 +31,10 @@ type OptimisticToggle = { habitId: string; completed: boolean };
  *
  * The checkbox flips from `useOptimistic` on the same frame as the tap. Streaks
  * and the 7-day rate are *not* computed here: they come from the server on the
- * re-render that `revalidatePath("/habits")` triggers, so a rollback has nothing
- * to undo. If the action fails, the transition ends without new props and the
- * optimistic map falls away — the box snaps back to the server's value.
+ * re-render triggered by `revalidatePath("/habits")` and `revalidatePath("/")`,
+ * so a rollback has nothing to undo. If the action fails, the transition ends
+ * without new props and the optimistic map falls away — the box snaps back to
+ * the server's value.
  */
 export function HabitChecklist({ habits, today }: HabitChecklistProps) {
   // Re-seeded whenever the server sends new data, so the passthrough is always

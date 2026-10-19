@@ -1,86 +1,87 @@
-import Link from "next/link";
-import { Activity, CheckCircle2, Circle, Database, Dumbbell, Flame } from "lucide-react";
+import type { Metadata } from "next";
+import { Suspense } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  HabitsCardSkeleton,
+  LastWorkoutSkeleton,
+  WeightCardSkeleton,
+} from "@/app/_components/dashboard-skeletons";
+import { LastWorkout } from "@/app/_components/last-workout";
+import { TodayHabits } from "@/app/_components/today-habits";
+import { WeightCard } from "@/app/_components/weight-card";
+import { getCurrentUser } from "@/lib/auth";
+import { parseIsoDate, todayIso } from "@/lib/date";
 
-const slices = [
-  { name: "Slice 1 — Daily Metrics & Macros", icon: Activity, ready: true },
-  { name: "Slice 2 — Habit Engine", icon: Flame, ready: true },
-  { name: "Slice 3 — Workout Logger", icon: Dumbbell, ready: true },
-  { name: "Slice 4 — Unified Dashboard", icon: CheckCircle2, ready: false },
-];
+export const metadata: Metadata = {
+  title: "Today",
+};
 
-export default function Home() {
+/**
+ * A `YYYY-MM-DD` calendar day, formatted against its UTC-midnight instant.
+ *
+ * `timeZone: "UTC"` is load-bearing: the value is a date-only string from
+ * `todayIso`, and re-reading it in the runtime's zone would print the previous
+ * day for anywhere west of UTC.
+ */
+const FRIENDLY_DATE = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+/**
+ * The dashboard.
+ *
+ * The page body is synchronous and contains no request data, so the whole shell
+ * — title, date fallback and the three card skeletons — is prerendered. Each
+ * card has its OWN `<Suspense>` boundary: one slow query only holds its own
+ * card back instead of making the page as slow as the slowest read.
+ *
+ * Nothing here uses `use cache`. The cards read the database per request, and
+ * the boundary is what keeps the shell static.
+ */
+export default function DashboardPage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-12">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Fitness &amp; Self-Improvement OS
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Log daily weight and macros, and track a 30-day weight trend.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="w-fit">
-            <Database />
-            Bootstrapped
-          </Badge>
-          <Link
-            href="/metrics"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            <Activity />
-            Daily metrics
-          </Link>
-          <Link
-            href="/habits"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            <Flame />
-            Habits
-          </Link>
-          <Link
-            href="/workouts"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            <Dumbbell />
-            Workouts
-          </Link>
-        </div>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-6">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
+
+        {/* The only header fragment that needs the user's timezone. */}
+        <Suspense
+          fallback={
+            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+          }
+        >
+          <DashboardDate />
+        </Suspense>
       </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Build order</CardTitle>
-          <CardDescription>
-            Features land one vertical slice at a time: Database → Server Action →
-            UI → QA.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="flex flex-col gap-3">
-            {slices.map(({ name, icon: Icon, ready }) => (
-              <li key={name} className="flex items-center gap-3 text-sm">
-                {ready ? (
-                  <CheckCircle2 className="text-primary size-4 shrink-0" />
-                ) : (
-                  <Circle className="text-muted-foreground size-4 shrink-0" />
-                )}
-                <Icon className="text-muted-foreground size-4 shrink-0" />
-                <span className="text-muted-foreground">{name}</span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-5">
+        <Suspense fallback={<WeightCardSkeleton />}>
+          <WeightCard />
+        </Suspense>
+
+        <Suspense fallback={<HabitsCardSkeleton />}>
+          <TodayHabits />
+        </Suspense>
+
+        <Suspense fallback={<LastWorkoutSkeleton />}>
+          <LastWorkout />
+        </Suspense>
+      </div>
     </main>
+  );
+}
+
+async function DashboardDate() {
+  const user = await getCurrentUser();
+  const today = todayIso(user.timezone);
+
+  return (
+    <p className="text-muted-foreground text-sm">
+      <time dateTime={today}>{FRIENDLY_DATE.format(parseIsoDate(today))}</time>
+      {" — "}your day at a glance.
+    </p>
   );
 }

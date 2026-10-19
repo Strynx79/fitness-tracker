@@ -490,6 +490,9 @@ export async function finishSession(sessionId: string): Promise<WorkoutMutationR
 
     revalidatePath(WORKOUTS_PATH);
     revalidatePath(sessionPath(parsed.data.sessionId));
+    // Completing a session changes the dashboard's "last workout" card, which
+    // would otherwise keep showing the previously completed session.
+    revalidatePath("/");
   } catch (error) {
     console.error("Failed to finish workout session:", error);
     return { ok: false, message: GENERIC_FAILURE };

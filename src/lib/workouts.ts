@@ -50,6 +50,21 @@ export type PreviousTopSet = {
   performedAtIso: string;
 };
 
+/** The dashboard's "last workout" card. */
+export type LastWorkoutSummary = {
+  id: string;
+  name: string;
+  /** ISO 8601 instant; this session is completed by definition. */
+  completedAtIso: string;
+  /** `completedAt - startedAt`, rounded to whole minutes and clamped at 0. */
+  durationMinutes: number;
+  setCount: number;
+  /** Sum of `weightKg * reps` over every set; bodyweight sets add 0. */
+  totalVolumeKg: number;
+  /** Distinct display names, in order of first appearance in the session. */
+  exerciseNames: string[];
+};
+
 export type WorkoutExerciseGroup = {
   exerciseKey: string;
   /** Display name as first typed in THIS session (may differ in case). */
@@ -92,6 +107,16 @@ function toSetDto(row: {
 }
 
 const MS_PER_DAY = 86_400_000;
+
+const MS_PER_MINUTE = 60_000;
+
+/**
+ * `Decimal(5, 2)` weights times integer reps stay within two decimals, so
+ * rounding the sum removes binary float noise without losing precision.
+ */
+function roundVolume(value: number): number {
+  return Number(value.toFixed(2));
+}
 
 /**
  * How far back a "previous top set" is allowed to reach.
@@ -390,6 +415,82 @@ export async function getWorkoutSessionList(
       exerciseNames,
     };
   });
+}
+
+/**
+ * The most recent COMPLETED session, summarised for the dashboard.
+ *
+ * `completedAt: { not: null }` is load-bearing: an in-progress session is the
+ * newest row by `startedAt`, so ordering on that (or dropping the filter) would
+ * present a workout the user is still doing as finished history. The
+ * `@@index([userId, completedAt])` serves this filter + sort directly.
+ *
+ * One query, with the sets included in the same round trip — a per-session
+ * count/aggregate afterwards would be an N+1. `createdAt`, then `setNumber`,
+ * fixes first-appearance order, matching `getWorkoutSessionList`, and dedupes on
+ * `exerciseKey` so "Bench Press"/"bench press" appear once.
+ */
+export async function getLastCompletedWorkout(
+  userId: string,
+): Promise<LastWorkoutSummary | null> {
+  const session = await prisma.workoutSession.findFirst({
+    where: { userId, completedAt: { not: null } },
+    // `startedAt` then `id` make the result deterministic when two sessions
+    // share a `completedAt` (seeded, imported, or batched data can do that to
+    // the millisecond). `completedAt` alone would let Postgres return either.
+    orderBy: [{ completedAt: "desc" }, { startedAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true,
+      name: true,
+      startedAt: true,
+      completedAt: true,
+      sets: {
+        select: {
+          exerciseName: true,
+          exerciseKey: true,
+          weightKg: true,
+          reps: true,
+        },
+        orderBy: [{ createdAt: "asc" }, { setNumber: "asc" }],
+      },
+    },
+  });
+
+  // The WHERE excludes nulls, but the generated type is still `Date | null`.
+  if (session === null || session.completedAt === null) return null;
+
+  const seenKeys = new Set<string>();
+  const exerciseNames: string[] = [];
+  let volume = 0;
+
+  for (const set of session.sets) {
+    if (!seenKeys.has(set.exerciseKey)) {
+      seenKeys.add(set.exerciseKey);
+      exerciseNames.push(set.exerciseName);
+    }
+
+    // A bodyweight set stores `0`, so it contributes 0 — volume measures
+    // external load, not the lifter's mass.
+    volume += set.weightKg.toNumber() * set.reps;
+  }
+
+  // A clock skew or a hand-edited row must not render "-3 min ago".
+  const durationMinutes = Math.max(
+    0,
+    Math.round(
+      (session.completedAt.getTime() - session.startedAt.getTime()) / MS_PER_MINUTE,
+    ),
+  );
+
+  return {
+    id: session.id,
+    name: session.name,
+    completedAtIso: session.completedAt.toISOString(),
+    durationMinutes,
+    setCount: session.sets.length,
+    totalVolumeKg: roundVolume(volume),
+    exerciseNames,
+  };
 }
 
 /**

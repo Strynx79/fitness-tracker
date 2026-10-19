@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { DailyMetric as DailyMetricRow } from "@/generated/prisma/client";
-import { isoDateRange, parseIsoDate, toIsoDate } from "@/lib/date";
+import { addDays, isoDateRange, parseIsoDate, toIsoDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 
 /**
@@ -26,6 +26,29 @@ export type WeightPoint = {
   date: string; // "YYYY-MM-DD"
   weightKg: number | null; // null for days with no weigh-in
 };
+
+/** Headline numbers for the dashboard's weight card. */
+export type WeightSummary = {
+  /** The newest actual weigh-in, or `null` when the user never weighed in. */
+  latest: { date: string; weightKg: number } | null; // date is "YYYY-MM-DD"
+  /** The user's target, or `null` when they have not set one. */
+  goalKg: number | null;
+  /** `latest.weightKg - goalKg`; positive means ABOVE goal. */
+  deltaKg: number | null;
+  /** `latest.weightKg - baseline`; negative means weight is trending down. */
+  change7dKg: number | null;
+  /** The weigh-in used as the 7-day baseline, so the UI can label the span honestly. */
+  baseline: { date: string; weightKg: number } | null;
+};
+
+/**
+ * Weights are `Decimal(5, 2)`, so two decimals is the full stored precision.
+ * Rounding the differences removes binary float noise (`79.8 - 75` is
+ * `4.800000000000001` in JS) without discarding any real value.
+ */
+function roundKg(value: number): number {
+  return Number(value.toFixed(2));
+}
 
 /** Just the columns `toDto` needs; satisfies both `select` results and full rows. */
 type DailyMetricColumns = Pick<
@@ -88,6 +111,91 @@ export async function getDailyMetricHistory(
   });
 
   return rows.map(toDto);
+}
+
+/**
+ * The dashboard's weight card: latest weigh-in, distance from goal, and the
+ * change against a reading at least a week older.
+ *
+ * The `weightKg IS NOT NULL` filter is the whole point of the nullable column:
+ * a day where the user logged macros but skipped the scale must never become
+ * "your latest weight". Reading the newest row and hoping its weight is present
+ * would show yesterday's number — or, worse, a null card after a macro-only day.
+ *
+ * At most three queries, all served by `@@unique([userId, date])`:
+ *   1. the user's goal (bounded by the primary key)
+ *   2. the newest non-null weigh-in
+ *   3. the baseline for the 7-day change (skipped when there is no latest)
+ */
+export async function getWeightSummary(userId: string): Promise<WeightSummary> {
+  // Queries 1 and 2 are independent; the goal does not depend on the weigh-in.
+  const [user, latestRow] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { goalWeightKg: true },
+    }),
+    prisma.dailyMetric.findFirst({
+      where: { userId, weightKg: { not: null } },
+      orderBy: { date: "desc" },
+      select: { date: true, weightKg: true },
+    }),
+  ]);
+
+  const goalKg =
+    user === null || user.goalWeightKg === null ? null : user.goalWeightKg.toNumber();
+
+  // The WHERE guarantees a non-null weight, but the generated type is still
+  // `Decimal | null`. Treat that as "no weigh-in" rather than asserting.
+  if (latestRow === null || latestRow.weightKg === null) {
+    return {
+      latest: null,
+      goalKg,
+      deltaKg: null,
+      change7dKg: null,
+      baseline: null,
+    };
+  }
+
+  const latestDate = toIsoDate(latestRow.date);
+  const latestWeightKg = latestRow.weightKg.toNumber();
+
+  // The boundary is "latest date minus 7 days". The baseline is the newest
+  // reading on or before that boundary, NOT the row exactly on it: a user who
+  // skipped the scale on day 7 still deserves a trend, and the closest earlier
+  // reading is the honest comparison.
+  const baselineBoundaryIso = addDays(latestDate, -7);
+
+  // Query 3 — one row, thanks to the (userId, date) index plus the sort.
+  const baselineRow = await prisma.dailyMetric.findFirst({
+    where: {
+      userId,
+      weightKg: { not: null },
+      date: { lte: parseIsoDate(baselineBoundaryIso) },
+    },
+    orderBy: { date: "desc" },
+    select: { date: true, weightKg: true },
+  });
+
+  // The baseline row is surfaced as-is (date AND weight) rather than reduced to
+  // its weight: because it is "on or before" the boundary, it can be much older
+  // than 7 days, and the UI can only say so if it knows the date.
+  const baseline =
+    baselineRow === null || baselineRow.weightKg === null
+      ? null
+      : {
+          date: toIsoDate(baselineRow.date),
+          weightKg: baselineRow.weightKg.toNumber(),
+        };
+
+  return {
+    latest: { date: latestDate, weightKg: latestWeightKg },
+    goalKg,
+    // Missing goal or missing weigh-in is `null`, never 0 and never NaN.
+    deltaKg: goalKg === null ? null : roundKg(latestWeightKg - goalKg),
+    change7dKg:
+      baseline === null ? null : roundKg(latestWeightKg - baseline.weightKg),
+    baseline,
+  };
 }
 
 /**

@@ -28,8 +28,24 @@ export type ToggleHabitResult = { ok: true } | { ok: false; message: string };
 
 export type ArchiveHabitResult = { ok: true } | { ok: false; message: string };
 
-/** The one path every mutation in this file invalidates. */
+/** The route that owns the full habit checklist. */
 const HABITS_PATH = "/habits";
+
+/** Slice 4 renders the same interactive checklist on the dashboard. */
+const DASHBOARD_PATH = "/";
+
+/**
+ * Invalidate every view that renders habit data.
+ *
+ * A toggle can now originate from `/` as well as `/habits`. Revalidating only
+ * the habits route leaves the dashboard's cached render in place, so the
+ * optimistic tick reverts on the next refresh. Keep this list in sync with any
+ * future screen that mounts the checklist.
+ */
+function revalidateHabitViews(): void {
+  revalidatePath(HABITS_PATH);
+  revalidatePath(DASHBOARD_PATH);
+}
 
 const GENERIC_FAILURE = "Something went wrong. Please try again.";
 
@@ -127,7 +143,7 @@ export async function createHabit(
         },
       });
 
-      revalidatePath(HABITS_PATH);
+      revalidateHabitViews();
 
       return {
         status: "success",
@@ -169,7 +185,7 @@ export async function createHabit(
     return { status: "error", message: GENERIC_FAILURE, values };
   }
 
-  revalidatePath(HABITS_PATH);
+  revalidateHabitViews();
 
   return { status: "success", message: `Added "${name}".` };
 }
@@ -236,7 +252,7 @@ export async function toggleHabit(
     return { ok: false, message: GENERIC_FAILURE };
   }
 
-  revalidatePath(HABITS_PATH);
+  revalidateHabitViews();
 
   return { ok: true };
 }
@@ -272,7 +288,7 @@ export async function archiveHabit(habitId: string): Promise<ArchiveHabitResult>
     return { ok: false, message: GENERIC_FAILURE };
   }
 
-  revalidatePath(HABITS_PATH);
+  revalidateHabitViews();
 
   return { ok: true };
 }

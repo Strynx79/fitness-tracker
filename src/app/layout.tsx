@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import { AppNav } from "@/app/_components/app-nav";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -26,9 +27,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      {/* Bottom padding reserves the fixed tab bar's height plus the iOS safe area. */}
+      <body className="min-h-full flex flex-col pb-[calc(4rem+env(safe-area-inset-bottom))]">
         {children}
-        <Toaster />
+        <AppNav />
+        {/* Top-center clears the fixed bottom tab bar and its safe-area inset. */}
+        <Toaster position="top-center" />
       </body>
     </html>
   );

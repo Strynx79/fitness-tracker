@@ -800,3 +800,79 @@ prisma/seed.ts                         + 6 sessions, 31 sets
 - "Latest body weight vs goal" reads the newest `DailyMetric.weightKg` against `User.goalWeightKg`.
 - "Today's habit checklist" can reuse `getHabitChecklist` unchanged.
 - Watch the `cacheComponents` rule: every one of those three reads needs its own Suspense boundary so the dashboard keeps a static shell.
+
+---
+
+## 11. Slice 4 — Unified Dashboard (execution record)
+
+Verified on 2026-10-19. **No migration, no seed change** — the existing fixtures populate all three cards.
+
+### Locked decisions
+
+| Decision | Choice |
+| --- | --- |
+| Habit card | **Interactive** — `HabitChecklist` reused verbatim (optimistic toggles work from `/`) |
+| Navigation | **Bottom tab bar**, app-wide in `layout.tsx` |
+| Weight card | Current, goal, delta, **and** a 7-day change |
+
+### Files
+
+```
+src/lib/daily-metrics.ts          + getWeightSummary (latest non-null weigh-in, goal delta, trend)
+src/lib/workouts.ts               + getLastCompletedWorkout
+src/app/habits/actions.ts         revalidateHabitViews() -> /habits AND /
+src/app/page.tsx                  rewritten: static shell + 3 independent boundaries
+src/app/_components/              app-nav, weight-card, today-habits, last-workout,
+                                  dashboard-skeletons, empty-state
+src/app/layout.tsx                mounts <AppNav />, bottom padding, Toaster moved to top-center
+src/app/metrics/actions.ts        + revalidatePath("/") in saveDailyMetric
+src/app/workouts/actions.ts       + revalidatePath("/") in finishSession
+```
+
+### Architecture notes
+
+- **Three independent Suspense boundaries, one per card.** A single boundary would make the page as slow as its slowest query. The prerendered shell contains **33 skeletons and 0 seeded strings** — proof the cards stream rather than block.
+- **The shell stays static.** The timezone-dependent date lives in its own boundary; contrast Slice 2, where the date forced the whole body to stream.
+- **`latest` skips null weights.** A day with macros but no weigh-in (`weightKg: null`) must not become "latest body weight". This is the payoff of the nullable columns.
+- **Every delta is `null`-safe.** `deltaKg`/`change7dKg` are `null` when the weight or goal is missing — never `NaN`, never a fake `0`. Deltas are rounded to 2dp so `79.8 - 75 = 4.800000000000001` cannot leak into the UI.
+- **The trend baseline is returned, not assumed.** `baseline` is the weigh-in the 7-day delta was measured against, so the card can say "0.6 kg since Oct 12" instead of falsely claiming "this week".
+- **An in-progress session is never "last workout"** (`completedAt: { not: null }`), the same rule that makes the previous-top-set correct.
+- **Revalidation is cross-cutting.** The dashboard reads from all three domains, so `saveDailyMetric`, `finishSession`, and the three habit actions all revalidate `/`. Missing this was the slice's most likely silent bug: the optimistic tick reverting, or a stale weight card.
+- **Date-only values are formatted in UTC; real instants in the user's timezone.** Formatting a `YYYY-MM-DD` in a user's zone slides it a day for anyone west of UTC.
+
+### Gate results and verification
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `lint` / `build` | ✅ 0 errors / clean / `/` = `◐` Partial Prerender |
+| Static shell | ✅ 33 skeletons, 0 seeded strings |
+| Routes | ✅ `/`, `/metrics`, `/habits`, `/workouts`, `/workouts/[id]` all 200 |
+| Nav | ✅ four tabs on every route; `aria-current="page"` correct on `/workouts/[id]` |
+| Dashboard content | ✅ `79.8`, `4.8 kg above goal`, `0.6 kg since Oct 12`, `Hit Protein Goal`, `8h Sleep`, `3 of 5 done`, `Push`, `70 min`, `9 sets`, `3,113 kg`, five exercise names |
+| `NaN` occurrences | ✅ 0 |
+| Headings | ✅ three `<h2>`s (Weight, Today's habits, Last workout) |
+| Empty user | ✅ all-null summary, no `NaN`; `getLastCompletedWorkout` → `null` |
+
+### QA follow-ups applied
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | `saveDailyMetric` and `finishSession` revalidated only their own routes, so the client router could serve a **stale weight or last-workout card** after a mutation — the same class of bug already fixed for habits. | Both now revalidate `/` too. |
+| S2 | Sonner's default bottom-right offset rendered every toast **underneath the fixed tab bar**. | Toaster moved to `position="top-center"`. |
+| S3 | The trend label claimed "this week" even when the baseline was months old, and rendered "No change" when there was no baseline at all. | `baseline` added to the DTO; renders "No trend yet" / "No change since <date>" / "0.6 kg since <date>". |
+| N1 | "N of M done" rendered twice in the habit card (wrapper + checklist). | Removed the outer count; the checklist owns it. |
+| N2 | Whole-card links carried an `aria-label`, which **replaces** the accessible name, hiding the weight/duration/volume from screen readers in links mode. | Removed; accessible name now comes from content. All three cards expose an `<h2>`. |
+| N3 | Exercise chips keyed by display name → possible duplicate keys on imported data. | Key includes the index. |
+| N4 | `getLastCompletedWorkout` ordered only by `completedAt`, non-deterministic on ties. | Added `startedAt` then `id` tiebreaks. |
+
+### Known MVP gaps
+
+- **`goalWeightKg` has no UI.** It is only set by `prisma/seed.ts`. For any account other than the seeded dev user, the weight card is permanently "No goal set" with no way to fix it. "Latest body weight vs goal" is therefore only half-complete as a product feature. A small goal field on `/metrics` (or a profile form) would close it.
+- **No test script.** The grace rule, the capped denominator, top-set ranking, session locking, and the weight deltas are all protected by fixtures and deleted throwaway scripts, not by regression tests. `node --test` needs no dependency.
+- **No auth**, and `getWorkoutSessionList` is unpaginated — both carried since Slice 0.
+- Reusing `HabitChecklist` verbatim puts an Archive control on the dashboard as well as `/habits`. Accepted.
+- No browser binary in this environment: every JS-only interaction (optimistic toggles, dialogs, active-tab transitions) was reviewed but never executed.
+
+### MVP status
+
+Slices 0–4 complete: daily metrics + macros with a 30-day trend, a habit engine with streaks and completion rates, a progressive-overload workout logger, and a unified dashboard. `npm run typecheck` is green and every route builds as Partial Prerender.

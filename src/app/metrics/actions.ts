@@ -118,6 +118,9 @@ export async function saveDailyMetric(
   }
 
   revalidatePath("/metrics");
+  // The dashboard's weight card reads the latest weigh-in and the 7-day
+  // baseline, so a save here changes that page too.
+  revalidatePath("/");
 
   return { status: "success", message: "Daily metrics saved." };
 }

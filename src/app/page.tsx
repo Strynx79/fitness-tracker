@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { Activity, CheckCircle2, Circle, Database, Dumbbell, Flame } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -10,7 +12,7 @@ import {
 } from "@/components/ui/card";
 
 const slices = [
-  { name: "Slice 1 — Daily Metrics & Macros", icon: Activity, ready: false },
+  { name: "Slice 1 — Daily Metrics & Macros", icon: Activity, ready: true },
   { name: "Slice 2 — Habit Engine", icon: Flame, ready: false },
   { name: "Slice 3 — Workout Logger", icon: Dumbbell, ready: false },
   { name: "Slice 4 — Unified Dashboard", icon: CheckCircle2, ready: false },
@@ -24,12 +26,21 @@ export default function Home() {
           Fitness &amp; Self-Improvement OS
         </h1>
         <p className="text-muted-foreground text-sm">
-          Slice 0 complete — the scaffold, database, and schema are in place.
+          Log daily weight and macros, and track a 30-day weight trend.
         </p>
-        <Badge variant="secondary" className="w-fit">
-          <Database />
-          Bootstrapped
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" className="w-fit">
+            <Database />
+            Bootstrapped
+          </Badge>
+          <Link
+            href="/metrics"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Activity />
+            Daily metrics
+          </Link>
+        </div>
       </header>
 
       <Card>

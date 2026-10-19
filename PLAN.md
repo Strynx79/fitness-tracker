@@ -392,9 +392,9 @@ model WorkoutSet {
 
 1. ~~**Prisma 7 ESM.**~~ **Resolved:** `npm run build` succeeds without setting
    `"type": "module"` — Next 16 bundles the ESM-only generated client correctly.
-2. **Timezone** becomes load-bearing in Slice 1 — and the bug is *invisible in local dev* because
-   the container is UTC. Confirm the client-sends-`YYYY-MM-DD` approach before writing any
-   date-handling code.
+2. ~~**Timezone** becomes load-bearing in Slice 1.~~ **Resolved in Slice 1:** dates are
+   `YYYY-MM-DD` end to end, and "today" is derived from `User.timezone` via `todayIso()`, never
+   from the server clock. See §8.
 3. **No auth = no ownership enforcement.** Any deployed URL exposes every row.
    `getCurrentUser()` must remain the single chokepoint so Slices 1–4 never inline the seed id.
 
@@ -497,3 +497,148 @@ fixed and re-verified.
 - **`weightKg Decimal @default(0)`** is kept. The NULLS-FIRST ordering concern is also solvable
   with `orderBy: { weightKg: { sort: "desc", nulls: "last" } }`, so this is a tie-break, not a
   defect — but Slice 3's Zod schema must require the field so a form bug cannot silently log 0 kg.
+
+---
+
+## 8. Slice 1 — Daily Metrics & Macros (execution record)
+
+Verified on 2026-10-19. No schema change, no migration — the Slice 0 `DailyMetric` model was
+sufficient as designed.
+
+### Scope
+
+Log `date`, `weightKg`, `calories`, `proteinG`, `notes`; show a 30-day weight trend chart and a
+recent-history table. **No habits or workout code** (one slice at a time).
+
+### Locked decisions
+
+| Decision | Choice |
+| --- | --- |
+| Date UX | Deep-link `?date=YYYY-MM-DD` with prefill; table rows link to it |
+| Weight bounds | `20–400 kg` (rejects `750` for `75.0`); schema allows up to 999.99 |
+| Seed | 30-day fixture set with explicit null/zero edge cases |
+| Validation | Server Actions + Zod only. **`react-hook-form` deliberately not added** |
+
+### Files
+
+```
+src/lib/validations/daily-metric.ts     Zod v4 schema, one preprocess helper for all optionals
+src/lib/daily-metrics.ts                server-only read layer + Decimal->number boundary
+src/app/metrics/actions.ts              'use server' saveDailyMetric
+src/app/metrics/page.tsx                Suspense shell, PageProps<"/metrics">
+src/app/metrics/_components/
+  metrics-date-nav.tsx                  GET form + router.push; no-JS fallback + <noscript>
+  daily-metric-form.tsx                 useActionState, Field/FieldError, hidden date
+  weight-trend-chart.tsx                Recharts LineChart via ChartContainer
+  metrics-history-table.tsx             shadcn Table, rows deep-link
+  metrics-skeleton.tsx                  Suspense fallback (in the static shell)
+src/app/page.tsx                        link to /metrics (placeholder stays until Slice 4)
+src/app/layout.tsx                      mounted <Toaster />
+prisma/seed.ts                          + 30 daily_metrics fixtures
+```
+
+shadcn primitives added: `field` (pulled in `separator`), `skeleton`, `textarea`.
+
+### Architecture notes that the next slice must respect
+
+- **`cacheComponents: true` governs everything.** Every Prisma read is inside `<Suspense>`, and
+  `searchParams` is awaited *inside* the boundary, never at the top of the page. `npm run build`
+  reports `/metrics` as `◐ (Partial Prerender)` — that output is the proof the boundary is correct.
+- **No `use cache`.** This data must be fresh immediately after a write; caching it would let a
+  user save a weigh-in and not see it.
+- **One Decimal boundary.** `weightKg` is converted with `.toNumber()` exactly once, at
+  `daily-metrics.ts`. Client components import that module **type-only**, so nothing server-only
+  is bundled.
+- **`""` must become `null`, never `0`.** A single `z.preprocess` helper handles `""`,
+  whitespace-only, `null`, and absent keys for all four optional fields. A real `"0"` survives as
+  `0`. Without this, a user who only weighed in would silently record `calories: 0`.
+- **Weight is validated as a string before `Number()`**, with at most 2 decimal places. This avoids
+  two traps at once: Postgres silently rounding `80.555` to `80.56`, and `.multipleOf(0.01)` being
+  unreliable due to floating-point (`80.55 / 0.01 = 8054.999...`).
+- **Ownership comes only from `getCurrentUser()`.** No form field can influence `userId`; the
+  action is reachable by direct POST and trusts nothing else.
+- **Upsert** on the `userId_date` compound key, with a **full overwrite** of the four value
+  columns. The form is the source of truth for that day, which is also what makes clearing a field
+  possible.
+- **A malformed `?date=` cannot 500.** `isIsoDate` guards it and it falls back to today. Arrays
+  (`?date=a&date=b`) take the first value.
+
+### Gate results
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | ✅ 0 errors |
+| `npm run lint` | ✅ 0 errors |
+| `npm run build` | ✅ `/metrics` = `◐ Partial Prerender` |
+| `npm run db:seed` | ✅ 30 fixture rows, idempotent |
+| Dev smoke (`/metrics`, `?date=2026-10-13`, `?date=abc`, `?date=2026-2-30`, `?date=%20`) | ✅ all HTTP 200 |
+
+### End-to-end verification (real Server Action over HTTP, not just types)
+
+Replayed genuine no-JS multipart submissions against the running action — extracting the
+`$ACTION_*` hidden fields the SSR form emits. This exercises validation, ownership, and the upsert
+together.
+
+| Case | Result |
+| --- | --- |
+| Save `81.23 / 2000 / 160` | ✅ 200; row updated; **row count unchanged** (upsert, not insert) |
+| Empty `calories`/`proteinG`/`notes` | ✅ stored as **`NULL`**, not `0` |
+| `weightKg: 500` | ✅ rejected — *"Weight must be 400 kg or less."*; row untouched |
+| `weightKg: 80.555` | ✅ rejected — *"Weight can have at most 2 decimal places."*; row untouched |
+| `calories: 0` | ✅ stored as **`0`**, distinct from `NULL` |
+| `?date=2030-01-01` | ✅ rejected — *"Date can't be in the future. Pick a date on or before 2026-10-19."*; no row created |
+
+The first and fifth rows are the point of the nullable schema: "unknown" and "zero" are provably
+different end to end.
+
+### QA audit follow-ups applied
+
+No blockers. The audit traced the `""`→`null` path, the Decimal boundary, the Suspense/PPR
+boundary, ownership, the upsert key, and Zod v4's `z.flattenError` as correct, then found four
+issues which were fixed and re-verified:
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | Raw Zod v4 defaults were rendered to the user (`Too small: expected number to be >0`, `Invalid input: expected int, received number`). | Every check now carries explicit user-facing copy; a hostile-input scan asserts no message contains `expected`, `Invalid input`, `Too small`, or `Too big`. |
+| S2 | `weightKg` accepted more precision than `DECIMAL(5,2)`, so Postgres silently rounded and the input kept showing the unrounded value. | Validate the string form for ≤2 decimal places, then transform to number. 3,200-value grid verified; `80.555` rejected, `080.50` accepted. |
+| S3 | A successful save was announced twice to assistive tech (sonner toast + inline `role="status"` live region). | Removed the success toast; the inline live region is the single announcement for both success and error — which also keeps it working with JS disabled. |
+| S4 | The out-of-range date error was unactionable: it named no limit and the only editable date control is in a different form. | Message now names the limit; the error renders as a prominent callout at the top of the form. |
+
+### Deviations from the plan as written
+
+1. **`MetricsDateNav` takes a second prop, `today`.** Needed to disable the next-day link and
+   "jump to today" without computing "now" from the device clock — the exact drift `date.ts`
+   exists to prevent.
+2. **`key={selectedDate}` on the entry form.** The inputs are uncontrolled, so `defaultValue` only
+   applies on mount. Without the key, tapping a history row would navigate but leave the previous
+   day's values in the form.
+3. **Added a `<noscript>` submit button** to the date nav. Without JS, changing a date input does
+   not submit itself, so the spec'd `method="get"` fallback would have been unreachable.
+4. **Added prev/next-day links and "Jump to today"** (navigation only, never writes values).
+5. **`"1e2"` is now rejected** (`Enter a number.`). It previously coerced to `100` via
+   `z.coerce.number()`. Tightening was required to keep the 2-decimal validation provable.
+6. **The seed is a rolling 30-day window and does not prune.** When IST rolled past midnight
+   mid-session, re-seeding added the new day and left the previous oldest row, so the table holds
+   31 rows. The extra row is outside the 30-day query window and invisible to the UI — history
+   accumulating is intended behaviour.
+
+### Known items (not blockers)
+
+- **The trend line was not visually confirmed.** Recharts 3 renders no SVG server-side and there
+  is no browser binary in this environment. The chart's data is verified in the RSC payload
+  (real weights plus `null` gaps), but the rendered line needs one human look via `npm run dev`.
+- **`todayIso` relies on `en-CA` producing ISO order.** Correct on full-ICU Node (official
+  binaries, Docker images). On a small-ICU build `en-CA` degenerates to `10/19/2026` and every
+  date operation would throw. Informational; harden with `formatToParts` if that ever matters.
+- **Uncontrolled inputs do not resync their display after a save** (e.g. `080.50` saves as `80.5`
+  but still displays `080.50`). Cosmetic.
+- **Unused generated surface:** `FieldSet`/`FieldLegend`/`FieldGroup`/`FieldContent`/`FieldTitle`
+  /`FieldSeparator` and `separator.tsx` are unused so far. Standard shadcn convention; keep.
+
+### Carried forward to Slice 2
+
+- **`Habit @@unique([userId, name])` vs archive-don't-delete.** Archiving "Read 20m" and then
+  re-adding it would raise P2002. Fix at the application layer: create-or-unarchive by
+  `(userId, name)` instead of a plain `create`, which also keeps streak history continuous.
+  A partial index is the wrong tool — Prisma cannot express it declaratively and would treat it as
+  drift.

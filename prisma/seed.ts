@@ -93,10 +93,143 @@ const DAILY_METRIC_FIXTURES: DailyMetricFixture[] = [
   { weightKg: 79.8, calories: 1900, proteinG: 155, notes: null },
 ];
 
+// ---------------------------------------------------------------------------
+// Slice 2 — habits (definitions + per-day logs)
+// ---------------------------------------------------------------------------
+
+/** IANA zone name for `SEED_TIMEZONE`; IST has no DST, so +05:30 is exact. */
+const SEED_UTC_OFFSET_HOURS = 5.5;
+
 /**
- * Slice 0 seeds exactly one row: the dev user that `getCurrentUser()` resolves.
- * Each feature slice adds its own fixtures when its UI needs them.
+ * An instant that reads as `hour`:00 on `dateIso` in the seed timezone.
+ *
+ * `createdAt` is a `timestamptz`, so the seeded value must be built as an
+ * instant, not as UTC midnight. `atLocalInstant(stepsStart, 1)` is deliberately
+ * hostile: 01:00 IST is 19:30 UTC the PREVIOUS day, which is exactly the case
+ * that makes `toIsoDate` over-count `daysAlive` while `isoDateInZone` (used by
+ * `getHabitChecklist`) gets it right.
  */
+function atLocalInstant(dateIso: string, hour: number): Date {
+  return new Date(
+    parseIsoDate(dateIso).getTime() +
+      (hour - SEED_UTC_OFFSET_HOURS) * 60 * 60 * 1000,
+  );
+}
+
+/** The `count` ISO dates ending at `endIso`, oldest first. */
+function consecutiveDays(endIso: string, count: number): string[] {
+  return Array.from({ length: count }, (_, index) =>
+    addDays(endIso, index - (count - 1)),
+  );
+}
+
+type HabitFixture = {
+  /** Pinned so re-running the seed targets the same row. */
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  /** Days before today; e.g. 2 means the habit is 2 days old. */
+  createdDaysAgo: number;
+  /** Local hour of day the habit was created at; see `atLocalInstant`. */
+  createdHour?: number;
+  /** Days before today the habit was archived, or null while it is active. */
+  archivedDaysAgo?: number;
+};
+
+/**
+ * Six fixtures, each chosen to exercise one branch of `getHabitChecklist`:
+ *
+ *   - `hab_seed_protein`  12 consecutive days incl. today  → streak 12, rate 100
+ *   - `hab_seed_sleep`    11 consecutive days ending YESTERDAY, nothing today
+ *                         → streak 11 via the grace rule (without it: 0)
+ *   - `hab_seed_read`     3 of the last 7 ticked, plus 2 unticked rows
+ *                         → streak 0, rate 43, and proof that unchecking
+ *                           persists as a `completed: false` row
+ *   - `hab_seed_steps`    created yesterday at 01:00 IST, ticked on both days it
+ *                         has existed → rate 100 via the capped denominator
+ *                         (a flat /7 would read 29; a UTC `createdAt` read,
+ *                         67). This is the fixture that pins both traps.
+ *   - `hab_seed_meditate` archived 5 days ago, logs on both sides of that
+ *                         → absent from the checklist, history intact
+ *   - `hab_seed_stretch`  ticked today + yesterday, then a 14-day gap
+ *                         → streak resets to 2 rather than counting the gap
+ */
+const HABIT_FIXTURES: HabitFixture[] = [
+  {
+    id: "hab_seed_protein",
+    name: "Hit Protein Goal",
+    description: "165 g of protein, come what may.",
+    sortOrder: 0,
+    createdDaysAgo: 14,
+  },
+  {
+    id: "hab_seed_sleep",
+    name: "8h Sleep",
+    description: "Lights out by 23:00 so the training actually counts.",
+    sortOrder: 1,
+    createdDaysAgo: 14,
+  },
+  {
+    id: "hab_seed_read",
+    name: "Read 20m",
+    description: "Twenty minutes of a book, not a feed.",
+    sortOrder: 2,
+    // Older than the rate window, so the denominator is a full 7.
+    createdDaysAgo: 30,
+  },
+  {
+    id: "hab_seed_steps",
+    name: "10k Steps",
+    description: "Walk the long way home.",
+    sortOrder: 3,
+    // Younger than the rate window, and ticked on EVERY day it has existed, so
+    // it must read 100%. "Created yesterday" (not two days ago) is what makes
+    // `daysAlive` exactly 2: the spec's `daysBetween(created, today) + 1` counts
+    // the creation day itself, so a habit created N days ago has lived N+1 days.
+    createdDaysAgo: 1,
+    // 01:00 IST — the case that catches UTC-vs-local `createdAt` handling:
+    // `toIsoDate` would read this as two days ago (3 alive days → 67%).
+    createdHour: 1,
+  },
+  {
+    id: "hab_seed_meditate",
+    name: "Meditate 10m",
+    description: "Ten quiet minutes before the inbox opens.",
+    sortOrder: 4,
+    createdDaysAgo: 20,
+    archivedDaysAgo: 5,
+  },
+  {
+    id: "hab_seed_stretch",
+    name: "Stretch",
+    description: "Hips and hamstrings, every evening.",
+    sortOrder: 5,
+    createdDaysAgo: 40,
+  },
+];
+
+/** Log fixtures just need a date and a flag; the habit id comes from the upsert. */
+type HabitLogFixture = { date: string; completed: boolean };
+
+/** Idempotent: one row per (habit, day), always the same `completed` value. */
+async function seedHabitLogs(
+  habitId: string,
+  fixtures: HabitLogFixture[],
+): Promise<number> {
+  for (const fixture of fixtures) {
+    const date = parseIsoDate(fixture.date);
+
+    await prisma.habitLog.upsert({
+      where: { habitId_date: { habitId, date } },
+      create: { habitId, date, completed: fixture.completed },
+      update: { completed: fixture.completed },
+    });
+  }
+
+  return fixtures.length;
+}
+
 async function main() {
   const user = await prisma.user.upsert({
     where: { id: DEV_USER_ID },
@@ -140,6 +273,112 @@ async function main() {
   console.log(
     `Seeded ${metricsSeeded} daily metric rows for ${user.id} (${oldest} → ${today})`,
   );
+
+  // Slice 2 — habits. Upserted on `userId_name` (the schema's unique key) with a
+  // pinned id, so this stays idempotent: re-running never duplicates a habit and
+  // never duplicates a log row.
+  let logsSeeded = 0;
+
+  for (const fixture of HABIT_FIXTURES) {
+    const createdAt = atLocalInstant(
+      addDays(today, -fixture.createdDaysAgo),
+      fixture.createdHour ?? 12,
+    );
+    const archivedAt =
+      fixture.archivedDaysAgo === undefined
+        ? null
+        : atLocalInstant(addDays(today, -fixture.archivedDaysAgo), 12);
+
+    const habit = await prisma.habit.upsert({
+      where: { userId_name: { userId: user.id, name: fixture.name } },
+      create: {
+        id: fixture.id,
+        userId: user.id,
+        name: fixture.name,
+        description: fixture.description,
+        sortOrder: fixture.sortOrder,
+        // Set explicitly: `@default(now())` would make every habit 1 day old,
+        // collapsing the capped-denominator branch into a flat denominator of 1.
+        createdAt,
+        archivedAt,
+      },
+      update: {
+        description: fixture.description,
+        sortOrder: fixture.sortOrder,
+        createdAt,
+        archivedAt,
+      },
+    });
+
+    // Per-habit logs, anchored to today.
+    let logs: HabitLogFixture[] = [];
+
+    switch (fixture.id) {
+      case "hab_seed_protein":
+        // 12 consecutive days including today.
+        logs = consecutiveDays(today, 12).map((date) => ({ date, completed: true }));
+        break;
+
+      case "hab_seed_sleep":
+        // 11 consecutive days ending yesterday; today is deliberately unlogged
+        // so the grace rule is the only thing keeping the streak alive.
+        logs = consecutiveDays(addDays(today, -1), 11).map((date) => ({
+          date,
+          completed: true,
+        }));
+        break;
+
+      case "hab_seed_read":
+        // 3 of the last 7 days ticked, plus 2 explicit unticks. A `false` row is
+        // what the real untick action writes, and it must not count toward the
+        // rate or the streak.
+        logs = [
+          { date: addDays(today, -6), completed: true },
+          { date: addDays(today, -5), completed: false },
+          { date: addDays(today, -4), completed: true },
+          { date: addDays(today, -3), completed: false },
+          { date: addDays(today, -2), completed: true },
+        ];
+        break;
+
+      case "hab_seed_steps":
+        // Every day this habit has existed: the capped denominator must read
+        // 100% rather than 2/7 = 29%.
+        logs = consecutiveDays(today, 2).map((date) => ({ date, completed: true }));
+        break;
+
+      case "hab_seed_meditate":
+        // History on both sides of the archive date (5 days ago).
+        logs = [
+          ...consecutiveDays(addDays(today, -6), 5).map((date) => ({
+            date,
+            completed: true,
+          })),
+          { date: addDays(today, -3), completed: true },
+          { date: addDays(today, -1), completed: true },
+        ];
+        break;
+
+      case "hab_seed_stretch":
+        // Today + yesterday, then nothing for a fortnight: the streak must stop
+        // at 2 instead of counting the gap.
+        logs = consecutiveDays(today, 2).map((date) => ({ date, completed: true }));
+        break;
+    }
+
+    logsSeeded += await seedHabitLogs(habit.id, logs);
+  }
+
+  const [habitCount, logCount] = await Promise.all([
+    prisma.habit.count({ where: { userId: user.id } }),
+    prisma.habitLog.count(),
+  ]);
+
+  console.log(
+    `Seeded ${HABIT_FIXTURES.length} habits and ${logsSeeded} log rows for ${user.id} ` +
+      `(${habitCount} habits / ${logCount} log rows total)`,
+  );
+
 }
 
 main()

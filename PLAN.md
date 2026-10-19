@@ -642,3 +642,83 @@ issues which were fixed and re-verified:
   `(userId, name)` instead of a plain `create`, which also keeps streak history continuous.
   A partial index is the wrong tool — Prisma cannot express it declaratively and would treat it as
   drift.
+
+---
+
+## 9. Slice 2 — Self-Improvement Habit Engine (execution record)
+
+Verified on 2026-10-19. **No migration** — the Slice 0 `Habit`/`HabitLog` model was sufficient.
+
+### Locked decisions
+
+| Decision | Choice |
+| --- | --- |
+| Checklist scope | **Today only** — streaks and rates are unambiguously anchored to today |
+| Management | **Create + archive** (soft delete; `archivedAt`) |
+| Toggles | **`useOptimistic`** — instant tick, then the server settles streak/rate |
+
+### Files
+
+```
+src/lib/date.ts                        + isoDateInZone(date, tz)  (todayIso now delegates to it)
+src/lib/validations/habit.ts           create/toggle/archive schemas
+src/lib/habits.ts                      server-only; 2 queries; streak + 7-day-rate math
+src/app/habits/actions.ts              createHabit, toggleHabit, archiveHabit
+src/app/habits/page.tsx + _components/ checklist, row, form, skeleton
+src/components/ui/checkbox.tsx         added
+prisma/seed.ts                         + 6 habit fixtures, 39 log rows
+```
+
+### The two algorithms — and why they are shaped that way
+
+**Current streak, with the grace rule.** `anchor` = today if completed, else yesterday if completed, else null → 0; then walk backwards. Without the grace rule every streak reads 0 from midnight until today's box is ticked, which is the classic streak-UI bug.
+
+**7-day completion rate, with a capped denominator.** `denominator = min(7, daysAlive)`, where `daysAlive` **counts the creation day**. A habit created yesterday that is completed both days reads **100%**, not 29%. A fixed `/7` punishes new habits and reads as failure.
+
+**`createdAt` must go through `isoDateInZone`, not `toIsoDate`.** `createdAt` is a `timestamptz`; `toIsoDate` formats in UTC, so a habit created at 01:00 IST lands on the previous UTC day, inflating `daysAlive` and showing 50% for a perfect first day. The seed pins this exact case.
+
+Both are computed on read — no denormalized counters, which would go stale on every toggle, archive, *and* at midnight.
+
+### Query plan
+
+Exactly 2 queries: active habits (`@@index([userId, archivedAt])`), then one `findMany` over `habitId: { in: ids }` with a 365-day `date` range. Zero habits skips the second query. Streaks cap at the window; `streakCapped` drives a `365+` label rather than silently under-reporting.
+
+### Gate results and verification
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `lint` / `build` | ✅ 0 errors / clean / `/habits` = `◐` Partial Prerender |
+| `prisma db seed` ×3 | ✅ 6 habits / 39 logs, no growth |
+| Independent stats run | ✅ see table below |
+| HTTP `toggleHabit` round-trip | ✅ untick keeps the row with `completed=false`; retick restores |
+| Ownership | ✅ ghost `habitId` → `ok:false "Habit not found."` with **0 rows written** |
+| Guards | ✅ archived habit and future date both rejected |
+
+| Fixture | streak | rate | Proves |
+| --- | --- | --- | --- |
+| Hit Protein Goal | 12 | 100% | normal streak |
+| **8h Sleep** | **11** | 86% | **grace rule** — non-zero with today unchecked |
+| Read 20m | 0 | 43% | sparse; 2 `completed:false` rows persist |
+| **10k Steps** | 2 | **100%** | **capped denominator** |
+| Stretch | 2 | 29% | streak reset after a gap |
+| Meditate 10m | — | — | archived: absent from the checklist, history intact |
+
+### QA follow-up applied
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | The create-or-unarchive path restored `archivedAt: null` but **dropped the submitted `description`**. Applying it blindly would be worse — a blank field would *wipe* the stored description. | A non-null description replaces it; a blank one preserves it. Both branches asserted; still exactly one row per `(userId, name)`. |
+
+### Deviations
+
+1. `archiveHabit` uses `updateMany({ where: { id, userId } })` + `count === 0` so ownership is enforced in the same statement as the write.
+2. Restoring a habit keeps its original `sortOrder`, so it reappears in its old position.
+3. A `P2002` from `create` maps to the same duplicate-name field error, since the lookup-then-create pair is not atomic.
+4. The seed is a **rolling 30-day window** for `daily_metrics` and does not prune, so the row count grows by one per day. Invisible to the UI, which queries the current window.
+
+### Known items
+
+- The optimistic flip and the archive confirm dialog are JS-only and **were not executed** — no browser binary available. Review-only.
+- `streakCapped` (`365+`) has no seed coverage; the longest seeded streak is 12.
+- There is still **no test script**, so the grace rule and the capped denominator are protected only by fixtures.
+

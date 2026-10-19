@@ -37,14 +37,26 @@ export function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Today's calendar date in the given IANA timezone (e.g. "Asia/Kolkata"). */
-export function todayIso(timeZone: string): string {
+/**
+ * Format an instant as `YYYY-MM-DD` in the given IANA timezone.
+ *
+ * Use this for any timestamp that belongs to a user's calendar day — e.g.
+ * `habit.createdAt`, which is a `timestamptz`. `toIsoDate` formats in UTC and
+ * would put a habit created at 01:00 IST on the previous day, skewing any
+ * "days since creation" calculation.
+ */
+export function isoDateInZone(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).format(date);
+}
+
+/** Today's calendar date in the given IANA timezone (e.g. "Asia/Kolkata"). */
+export function todayIso(timeZone: string): string {
+  return isoDateInZone(new Date(), timeZone);
 }
 
 /**

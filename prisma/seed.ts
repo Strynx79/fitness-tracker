@@ -230,6 +230,469 @@ async function seedHabitLogs(
   return fixtures.length;
 }
 
+// ---------------------------------------------------------------------------
+// Slice 3 — workout sessions + logged sets
+// ---------------------------------------------------------------------------
+
+/**
+ * One set row. `exerciseKey` is written explicitly (the runtime derivation lives
+ * in `deriveExerciseKey` in `src/app/workouts/actions.ts`: trim, collapse
+ * whitespace runs, lowercase). It is duplicated here because importing a
+ * `"use server"` module into a tsx script would drag in Next's request context;
+ * the fixtures below are hand-checked to hold that invariant.
+ */
+type WorkoutSetFixture = {
+  exerciseName: string;
+  exerciseKey: string;
+  setNumber: number;
+  weightKg: number;
+  reps: number;
+  rpe: number | null;
+};
+
+type WorkoutSessionFixture = {
+  /** Pinned so re-running the seed upserts the same session. */
+  id: string;
+  name: string;
+  notes: string | null;
+  /** In progress: a true instant, N hours before now. */
+  startedHoursAgo?: number;
+  /** Completed: N days ago at `startedHour` local time. */
+  startedDaysAgo?: number;
+  startedHour?: number;
+  /** Minutes after `startedAt`. Absent → `completedAt: null` (in progress). */
+  durationMinutes?: number;
+  sets: WorkoutSetFixture[];
+};
+
+/**
+ * Six sessions, each chosen to exercise one branch of `getWorkoutSession`:
+ *
+ *   - `ws_seed_push_active`  started 3h ago and NOT completed. It must never be
+ *                            picked as a "previous top set" target; the callout
+ *                            for its Bench Press must come from the 5-day session
+ *   - `ws_seed_push_recent`  the main target: Bench 90×5 @9.5 is the top set even
+ *                            though 85×6 has more reps, plus an `rpe: null` set
+ *                            and bodyweight pull-ups (`weightKg: 0`)
+ *   - `ws_seed_push_older`   Bench 85×6 — the heavier-rep set that must NOT be
+ *                            offered, because a newer session contains the lift
+ *   - `ws_seed_pull`         bodyweight top set (0×8), and a row whose display
+ *                            name is lowercase "bench press" but whose key is
+ *                            canonical, so it joins the Bench Press history
+ *   - `ws_seed_legs`         a 5-set squat (setNumber 1..5) and a second exercise
+ *                            whose numbering restarts at 1
+ *   - `ws_seed_push_oldest`  a third Push, so "the most recent earlier session"
+ *                            is unambiguous rather than a two-way coin flip
+ */
+const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
+  {
+    id: "ws_seed_push_active",
+    name: "Push",
+    notes: "Session still open — the last set is logging now.",
+    startedHoursAgo: 3,
+    sets: [
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 1,
+        weightKg: 92.5,
+        reps: 4,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 1,
+        weightKg: 0,
+        reps: 8,
+        rpe: 9,
+      },
+    ],
+  },
+  {
+    id: "ws_seed_push_recent",
+    name: "Push",
+    notes: "Felt strong. Bench moved well after the warm-up.",
+    startedDaysAgo: 5,
+    startedHour: 18,
+    durationMinutes: 70,
+    sets: [
+      // Top set: heaviest wins, so 90×5 beats 85×6 on reps.
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 1,
+        weightKg: 90,
+        reps: 5,
+        rpe: 9.5,
+      },
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 2,
+        weightKg: 85,
+        reps: 6,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 3,
+        weightKg: 80,
+        reps: 8,
+        rpe: 8,
+      },
+      // Bodyweight sets: 0 is a real weight and ranks as the top set here,
+      // because there is nothing heavier for this exercise in this session.
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 1,
+        weightKg: 0,
+        reps: 10,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 2,
+        weightKg: 0,
+        reps: 8,
+        rpe: 10,
+      },
+      // An unrated set: `rpe` is nullable and must stay `null`, not 0.
+      {
+        exerciseName: "Overhead Press",
+        exerciseKey: "overhead press",
+        setNumber: 1,
+        weightKg: 55,
+        reps: 8,
+        rpe: null,
+      },
+      {
+        exerciseName: "Overhead Press",
+        exerciseKey: "overhead press",
+        setNumber: 2,
+        weightKg: 52.5,
+        reps: 10,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Triceps Pushdown",
+        exerciseKey: "triceps pushdown",
+        setNumber: 1,
+        weightKg: 30,
+        reps: 12,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Lateral Raise",
+        exerciseKey: "lateral raise",
+        setNumber: 1,
+        weightKg: 12.5,
+        reps: 15,
+        rpe: 9.5,
+      },
+    ],
+  },
+  {
+    id: "ws_seed_push_older",
+    name: "Push",
+    notes: null,
+    startedDaysAgo: 12,
+    startedHour: 18,
+    durationMinutes: 65,
+    sets: [
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 1,
+        weightKg: 85,
+        reps: 6,
+        rpe: 9.5,
+      },
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 2,
+        weightKg: 82.5,
+        reps: 8,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Overhead Press",
+        exerciseKey: "overhead press",
+        setNumber: 1,
+        weightKg: 52.5,
+        reps: 8,
+        rpe: 9,
+      },
+    ],
+  },
+  {
+    id: "ws_seed_pull",
+    name: "Pull",
+    notes: null,
+    startedDaysAgo: 7,
+    startedHour: 18,
+    durationMinutes: 60,
+    sets: [
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 1,
+        weightKg: 0,
+        reps: 8,
+        rpe: 8,
+      },
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 2,
+        weightKg: 0,
+        reps: 6,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Pull-Up",
+        exerciseKey: "pull-up",
+        setNumber: 3,
+        weightKg: 0,
+        reps: 5,
+        rpe: 10,
+      },
+      // Typed lowercase on purpose: the display name is preserved, but the key
+      // is identical to the "Bench Press" rows, so this session counts as
+      // Bench Press history (and, being older, loses to the 5-day session).
+      {
+        exerciseName: "bench press",
+        exerciseKey: "bench press",
+        setNumber: 1,
+        weightKg: 70,
+        reps: 10,
+        rpe: 8,
+      },
+      {
+        exerciseName: "Barbell Row",
+        exerciseKey: "barbell row",
+        setNumber: 1,
+        weightKg: 60,
+        reps: 8,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Barbell Row",
+        exerciseKey: "barbell row",
+        setNumber: 2,
+        weightKg: 60,
+        reps: 8,
+        rpe: 9,
+      },
+    ],
+  },
+  {
+    id: "ws_seed_legs",
+    name: "Legs",
+    notes: "Five sets of squats, then a hinge accessory.",
+    startedDaysAgo: 14,
+    startedHour: 18,
+    durationMinutes: 80,
+    sets: [
+      // setNumber runs 1..5 for the squat …
+      {
+        exerciseName: "Back Squat",
+        exerciseKey: "back squat",
+        setNumber: 1,
+        weightKg: 140,
+        reps: 5,
+        rpe: 9.5,
+      },
+      {
+        exerciseName: "Back Squat",
+        exerciseKey: "back squat",
+        setNumber: 2,
+        weightKg: 135,
+        reps: 5,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Back Squat",
+        exerciseKey: "back squat",
+        setNumber: 3,
+        weightKg: 130,
+        reps: 5,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Back Squat",
+        exerciseKey: "back squat",
+        setNumber: 4,
+        weightKg: 125,
+        reps: 5,
+        rpe: 8.5,
+      },
+      {
+        exerciseName: "Back Squat",
+        exerciseKey: "back squat",
+        setNumber: 5,
+        weightKg: 120,
+        reps: 5,
+        rpe: 8,
+      },
+      // … and restarts at 1 for the next exercise.
+      {
+        exerciseName: "Romanian Deadlift",
+        exerciseKey: "romanian deadlift",
+        setNumber: 1,
+        weightKg: 100,
+        reps: 8,
+        rpe: 8,
+      },
+      {
+        exerciseName: "Romanian Deadlift",
+        exerciseKey: "romanian deadlift",
+        setNumber: 2,
+        weightKg: 95,
+        reps: 8,
+        rpe: 8,
+      },
+      {
+        exerciseName: "Romanian Deadlift",
+        exerciseKey: "romanian deadlift",
+        setNumber: 3,
+        weightKg: 90,
+        reps: 10,
+        rpe: 9,
+      },
+    ],
+  },
+  {
+    id: "ws_seed_push_oldest",
+    name: "Push",
+    notes: null,
+    startedDaysAgo: 20,
+    startedHour: 18,
+    durationMinutes: 60,
+    sets: [
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 1,
+        weightKg: 80,
+        reps: 8,
+        rpe: 8,
+      },
+      {
+        exerciseName: "Bench Press",
+        exerciseKey: "bench press",
+        setNumber: 2,
+        weightKg: 77.5,
+        reps: 10,
+        rpe: 9,
+      },
+      {
+        exerciseName: "Overhead Press",
+        exerciseKey: "overhead press",
+        setNumber: 1,
+        weightKg: 50,
+        reps: 10,
+        rpe: 8,
+      },
+    ],
+  },
+];
+
+/**
+ * Idempotent workout fixtures.
+ *
+ * Sessions upsert on their pinned `id`; sets upsert on the schema's
+ * `@@unique([sessionId, exerciseKey, setNumber])`. Both branches write every
+ * column, so a re-run repairs hand-edited fixtures instead of duplicating them.
+ *
+ * `createdAt` is pinned to `startedAt + n minutes` (4 minutes per set) rather
+ * than left to `@default(now())`: the read model uses creation order to decide
+ * each exercise group's "first typed" display name, and a batch of inserts in
+ * the same millisecond would make that order arbitrary.
+ */
+async function seedWorkoutSessions(
+  userId: string,
+  today: string,
+): Promise<{ sessions: number; sets: number }> {
+  const FOUR_MINUTES_MS = 4 * 60 * 1000;
+  let setsSeeded = 0;
+
+  for (const fixture of WORKOUT_SESSION_FIXTURES) {
+    // In-progress fixtures are anchored to a real instant ("3 hours ago") so the
+    // session is genuinely open; completed ones are anchored to a local hour of
+    // day so the seeded history reads like a real training log.
+    const startedAt =
+      fixture.startedHoursAgo !== undefined
+        ? new Date(Date.now() - fixture.startedHoursAgo * 60 * 60 * 1000)
+        : atLocalInstant(
+            addDays(today, -(fixture.startedDaysAgo ?? 0)),
+            fixture.startedHour ?? 18,
+          );
+
+    const completedAt =
+      fixture.durationMinutes === undefined
+        ? null
+        : new Date(startedAt.getTime() + fixture.durationMinutes * 60 * 1000);
+
+    const session = await prisma.workoutSession.upsert({
+      where: { id: fixture.id },
+      create: {
+        id: fixture.id,
+        userId,
+        name: fixture.name,
+        notes: fixture.notes,
+        startedAt,
+        completedAt,
+      },
+      update: {
+        name: fixture.name,
+        notes: fixture.notes,
+        startedAt,
+        completedAt,
+      },
+    });
+
+    for (const [index, set] of fixture.sets.entries()) {
+      const columns = {
+        exerciseName: set.exerciseName,
+        exerciseKey: set.exerciseKey,
+        weightKg: set.weightKg,
+        reps: set.reps,
+        rpe: set.rpe,
+        createdAt: new Date(startedAt.getTime() + index * FOUR_MINUTES_MS),
+      };
+
+      await prisma.workoutSet.upsert({
+        where: {
+          sessionId_exerciseKey_setNumber: {
+            sessionId: session.id,
+            exerciseKey: set.exerciseKey,
+            setNumber: set.setNumber,
+          },
+        },
+        create: {
+          sessionId: session.id,
+          setNumber: set.setNumber,
+          ...columns,
+        },
+        update: columns,
+      });
+
+      setsSeeded += 1;
+    }
+  }
+
+  return { sessions: WORKOUT_SESSION_FIXTURES.length, sets: setsSeeded };
+}
+
+/**
+ * Slice 0 seeds exactly one row: the dev user that `getCurrentUser()` resolves.
+ * Each feature slice adds its own fixtures when its UI needs them.
+ */
 async function main() {
   const user = await prisma.user.upsert({
     where: { id: DEV_USER_ID },
@@ -379,6 +842,21 @@ async function main() {
       `(${habitCount} habits / ${logCount} log rows total)`,
   );
 
+  // Slice 3 — workout history. The in-progress session is deliberately the
+  // newest one: `getWorkoutSession` must ignore it when it looks for a
+  // "previous top set" target.
+  const workout = await seedWorkoutSessions(user.id, today);
+
+  const [sessionCount, setCount] = await Promise.all([
+    prisma.workoutSession.count({ where: { userId: user.id } }),
+    prisma.workoutSet.count(),
+  ]);
+
+  console.log(
+    `Seeded ${workout.sessions} workout sessions and ${workout.sets} set rows for ${user.id} ` +
+      `(${sessionCount} sessions / ${setCount} set rows total; ` +
+      `ws_seed_push_active left in progress)`,
+  );
 }
 
 main()

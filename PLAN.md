@@ -722,3 +722,81 @@ Exactly 2 queries: active habits (`@@index([userId, archivedAt])`), then one `fi
 - `streakCapped` (`365+`) has no seed coverage; the longest seeded streak is 12.
 - There is still **no test script**, so the grace rule and the capped denominator are protected only by fixtures.
 
+---
+
+## 10. Slice 3 — Workout & Progressive Overload Logger (execution record)
+
+Verified on 2026-10-19. **No migration** — `WorkoutSession`/`WorkoutSet` were sufficient.
+
+### Locked decisions
+
+| Decision | Choice |
+| --- | --- |
+| Lifecycle | **In-progress + explicit Finish** — `completedAt` NULL while active, stamped on Finish |
+| Top set | **Heaviest `weightKg`**, tie-break most reps, then lowest `setNumber` |
+| Correction | **Delete a set** (a mistyped set would otherwise poison every future target) |
+
+### Files
+
+```
+src/lib/validations/numbers.ts         shared decimal-string builder (min/decimals/messages)
+src/lib/validations/workout.ts         create/logSet/delete/finish/discard schemas
+src/lib/workouts.ts                    server-only; session list, detail, suggestions, DTOs
+src/app/workouts/actions.ts            createSession, logSet, deleteSet, finishSession, discardSession
+src/app/workouts/page.tsx + _components/            list + new-session form
+src/app/workouts/[id]/page.tsx + _components/       header, log-set form, exercise groups
+src/lib/workout-format.ts              shared explicit-timezone formatters
+prisma/seed.ts                         + 6 sessions, 31 sets
+```
+
+### Rules that matter
+
+- **`exerciseKey` is derived server-side only** (`trim → collapse whitespace → lowercase`) and is never a form field. `exerciseName` keeps what the user typed. This is what stops `"Bench Press"` and `"bench  press"` fragmenting history and silently emptying the "beat this" callout.
+- **`setNumber` is computed** from `_max(setNumber)` scoped to `(sessionId, exerciseKey)`, never client-supplied. `P2002` is handled as a retryable message. Deleting does **not** renumber, so gaps are expected.
+- **Previous top set:** only `completedAt IS NOT NULL` sessions, current session excluded, 12-month window on session start, one query for all exercise keys, then a JS reduction. An in-progress session can never become a target.
+- **`weightKg` is NOT NULL**, so `0` (bodyweight) ranks as a real top set rather than being lost to Postgres's NULLS-FIRST ordering.
+- **Every mutation runs in a transaction whose first statement is a guarded `updateMany` on the session row** (`{ id, userId, completedAt: null }`). The UPDATE takes a row lock held to commit, so concurrent mutations serialize and a finish cannot interleave with a set write.
+
+### Gate results and verification
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `lint` / `build` | ✅ 0 errors / clean / `/workouts` and `/workouts/[id]` both `◐` |
+| `prisma db seed` ×2 | ✅ 6 sessions / 31 sets, no growth |
+| HTTP log-set form replay | ✅ set **#2** auto-assigned, RPE 8.5 persisted, session went 2 → 3 sets |
+| Previous top set (Bench Press) | ✅ `90 kg × 5 @ 9.5` from the 5-day-old session — not the 12-day-old 85×6, not the in-progress one |
+| Bodyweight top set (pull-ups) | ✅ `weightKg: 0` chosen, not null |
+| Per-exercise numbering | ✅ squat 1..5, second exercise restarts at 1 |
+| Ownership | ✅ foreign/bogus session id → `null`; `logSet` into a finished session rejected; bogus `deleteSet`/`finishSession` → `{ok:false}` |
+| Concurrency invariants (24 runs) | ✅ completed ⇒ ≥1 set; **no set `createdAt` after `completedAt`**; `setNumber` unique per exercise |
+
+### QA follow-ups applied
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | `logSet`/`finishSession`/`deleteSet` read-then-wrote without serialization: a concurrent finish could write a set into finished history, or leave a completed session with **zero** sets. | All four mutations now lock the session row inside a `$transaction` and re-check inside it. Proven over 24 concurrent runs. |
+| N1 | Previous-top-set grouping keyed on `startedAt` rather than session id — two sessions sharing a timestamp would be merged. | Keys on `session.id`; `startedAt` only picks the newest. |
+| N2 | Session summaries deduped by display name, so one session could list both `"Bench Press"` and `"bench press"`. | Dedupes on `exerciseKey`. |
+| N3 | A failed **no-JS** submit lost the controlled exercise name while keeping the numeric values. | Seeds the controlled state from `state.values?.exerciseName`. |
+
+### Deviations
+
+1. **Unknown session ids return a soft 404** (HTTP 200 with correct not-found UI and `noindex`). `notFound()` sits inside the Suspense boundary, which `cacheComponents` requires; a hard 404 would mean awaiting the DB check above the boundary and losing PPR for the route. Accepted.
+2. Delete is hidden on completed sessions, because the action refuses them.
+3. `src/lib/workout-format.ts` was added so server and client components share one explicit-timezone formatter.
+4. The log-set form's exercise name is **controlled** so it survives the post-submit reset — you can log set after set without retyping it.
+5. `finishSession` additionally carries `sets: { some: {} }` in its `updateMany`, so an empty session cannot be completed even under a concurrent delete.
+
+### Known items
+
+- No browser: the controlled-input persistence, the delete/finish/discard dialogs, and the optimistic interactions **were not executed**.
+- `getWorkoutSessionList` is unpaginated.
+- Decimal validation now exists in two places (`daily-metric.ts` is committed and was deliberately left untouched). `numbers.ts` is the consolidation target.
+- `WorkoutSet` has no `isWarmup` flag, so a heavy warmup single would be picked as the top set. Add in a later slice if warmups are logged.
+
+### Carried into Slice 4
+
+- The dashboard needs "last **completed** workout", which is `where: { userId, completedAt: { not: null } } order by completedAt desc take 1` — served by `@@index([userId, completedAt])`.
+- "Latest body weight vs goal" reads the newest `DailyMetric.weightKg` against `User.goalWeightKg`.
+- "Today's habit checklist" can reuse `getHabitChecklist` unchanged.
+- Watch the `cacheComponents` rule: every one of those three reads needs its own Suspense boundary so the dashboard keeps a static shell.

@@ -14,7 +14,7 @@ import {
 const slices = [
   { name: "Slice 1 — Daily Metrics & Macros", icon: Activity, ready: true },
   { name: "Slice 2 — Habit Engine", icon: Flame, ready: true },
-  { name: "Slice 3 — Workout Logger", icon: Dumbbell, ready: false },
+  { name: "Slice 3 — Workout Logger", icon: Dumbbell, ready: true },
   { name: "Slice 4 — Unified Dashboard", icon: CheckCircle2, ready: false },
 ];
 
@@ -46,6 +46,13 @@ export default function Home() {
           >
             <Flame />
             Habits
+          </Link>
+          <Link
+            href="/workouts"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Dumbbell />
+            Workouts
           </Link>
         </div>
       </header>

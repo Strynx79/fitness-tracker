@@ -5,12 +5,12 @@
 - Delegate codebase searches and file discovery to `@explore`.
 - Delegate Prisma schema changes and backend Server Actions to `@db-architect`.
 - Delegate React components, Tailwind styling, and Recharts pages to `@ui-builder`.
-- After every feature slice is built, invoke `@qa-reviewer` to audit the `git diff` and run `npm run typecheck`.
+- After every feature slice is built, invoke `@qa-reviewer` to audit the `git diff` and run `npm run verify`.
 
 ## 2. Engineering Rules
 - **Vertical Slices Only:** Never build two slices at once. Finish the Database -> Server Action -> UI -> QA loop for one slice before touching the next.
 - **Strict TypeScript:** Never use `any`. Validate all form inputs with Zod.
-- **Verification First:** A task is NEVER complete until `npm run typecheck` passes with 0 errors.
+- **Verification First:** A task is NEVER complete until `npm run verify` (typecheck + lint + tests) passes with 0 errors.
 
 ## Environment & Filesystem Isolation (WSL Native)
 - **Strictly Native Linux:** All commands, services, tools, and dependencies must run 100% inside the native WSL Linux environment (`/home/adwaith/...`).

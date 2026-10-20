@@ -1,8 +1,13 @@
 import "server-only";
 
 import type { DailyMetric as DailyMetricRow } from "@/generated/prisma/client";
-import { addDays, isoDateRange, parseIsoDate, toIsoDate } from "@/lib/date";
+import { addDays, parseIsoDate, toIsoDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { summarizeWeight } from "@/lib/weight-summary";
+
+// Re-exported from the pure module so existing callers keep their import path.
+export { buildWeightSeries } from "@/lib/weight-series";
+export type { WeightPoint } from "@/lib/weight-series";
 
 /**
  * Read model for a day's metrics.
@@ -21,12 +26,6 @@ export type DailyMetricDto = {
   notes: string | null;
 };
 
-/** One point on the weight trend chart. */
-export type WeightPoint = {
-  date: string; // "YYYY-MM-DD"
-  weightKg: number | null; // null for days with no weigh-in
-};
-
 /** Headline numbers for the dashboard's weight card. */
 export type WeightSummary = {
   /** The newest actual weigh-in, or `null` when the user never weighed in. */
@@ -42,13 +41,9 @@ export type WeightSummary = {
 };
 
 /**
- * Weights are `Decimal(5, 2)`, so two decimals is the full stored precision.
- * Rounding the differences removes binary float noise (`79.8 - 75` is
- * `4.800000000000001` in JS) without discarding any real value.
+ * Weights are `Decimal(5, 2)`; the subtraction and its two-decimal rounding live
+ * in `@/lib/weight-summary`, which is pure and unit-tested.
  */
-function roundKg(value: number): number {
-  return Number(value.toFixed(2));
-}
 
 /** Just the columns `toDto` needs; satisfies both `select` results and full rows. */
 type DailyMetricColumns = Pick<
@@ -187,36 +182,14 @@ export async function getWeightSummary(userId: string): Promise<WeightSummary> {
           weightKg: baselineRow.weightKg.toNumber(),
         };
 
+  const latest = { date: latestDate, weightKg: latestWeightKg };
+
   return {
-    latest: { date: latestDate, weightKg: latestWeightKg },
+    latest,
     goalKg,
-    // Missing goal or missing weigh-in is `null`, never 0 and never NaN.
-    deltaKg: goalKg === null ? null : roundKg(latestWeightKg - goalKg),
-    change7dKg:
-      baseline === null ? null : roundKg(latestWeightKg - baseline.weightKg),
+    // Missing goal, weigh-in or baseline is `null`, never 0 and never NaN. The
+    // pure module also rounds to two decimals so float noise cannot leak.
+    ...summarizeWeight({ latest, goalKg, baseline }),
     baseline,
   };
-}
-
-/**
- * Left-joins `history` against every day in the range, ascending.
- *
- * Days with no row (or a row with a null weight) become `{ weightKg: null }` so
- * the chart keeps a contiguous, evenly spaced x-axis instead of collapsing the
- * gaps and implying weigh-ins the user never did.
- */
-export function buildWeightSeries(
-  history: DailyMetricDto[],
-  startIso: string,
-  endIso: string,
-): WeightPoint[] {
-  const weightByDate = new Map<string, number>();
-  for (const row of history) {
-    if (row.weightKg !== null) weightByDate.set(row.date, row.weightKg);
-  }
-
-  return isoDateRange(startIso, endIso).map((date) => ({
-    date,
-    weightKg: weightByDate.get(date) ?? null,
-  }));
 }

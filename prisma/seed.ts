@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { addDays, parseIsoDate, todayIso } from "../src/lib/date";
 import { DEV_USER_ID } from "../src/lib/dev-user";
+import { deriveExerciseKey } from "../src/lib/exercise";
 
 // Seed runs outside Next.js (via tsx), so it builds its own client instead of
 // importing src/lib/db.ts — that module resolves "@/..." aliases tsx can't see.
@@ -235,15 +236,12 @@ async function seedHabitLogs(
 // ---------------------------------------------------------------------------
 
 /**
- * One set row. `exerciseKey` is written explicitly (the runtime derivation lives
- * in `deriveExerciseKey` in `src/app/workouts/actions.ts`: trim, collapse
- * whitespace runs, lowercase). It is duplicated here because importing a
- * `"use server"` module into a tsx script would drag in Next's request context;
- * the fixtures below are hand-checked to hold that invariant.
+ * One set row. `exerciseKey` is NOT stored here: it is derived from the display
+ * name with the same `deriveExerciseKey` the server action uses (trim, collapse
+ * whitespace runs, lowercase), so the seed cannot drift from the runtime rule.
  */
 type WorkoutSetFixture = {
   exerciseName: string;
-  exerciseKey: string;
   setNumber: number;
   weightKg: number;
   reps: number;
@@ -293,7 +291,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
     sets: [
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 1,
         weightKg: 92.5,
         reps: 4,
@@ -301,7 +298,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 1,
         weightKg: 0,
         reps: 8,
@@ -320,7 +316,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // Top set: heaviest wins, so 90×5 beats 85×6 on reps.
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 1,
         weightKg: 90,
         reps: 5,
@@ -328,7 +323,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 2,
         weightKg: 85,
         reps: 6,
@@ -336,7 +330,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 3,
         weightKg: 80,
         reps: 8,
@@ -346,7 +339,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // because there is nothing heavier for this exercise in this session.
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 1,
         weightKg: 0,
         reps: 10,
@@ -354,7 +346,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 2,
         weightKg: 0,
         reps: 8,
@@ -363,7 +354,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // An unrated set: `rpe` is nullable and must stay `null`, not 0.
       {
         exerciseName: "Overhead Press",
-        exerciseKey: "overhead press",
         setNumber: 1,
         weightKg: 55,
         reps: 8,
@@ -371,7 +361,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Overhead Press",
-        exerciseKey: "overhead press",
         setNumber: 2,
         weightKg: 52.5,
         reps: 10,
@@ -379,7 +368,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Triceps Pushdown",
-        exerciseKey: "triceps pushdown",
         setNumber: 1,
         weightKg: 30,
         reps: 12,
@@ -387,7 +375,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Lateral Raise",
-        exerciseKey: "lateral raise",
         setNumber: 1,
         weightKg: 12.5,
         reps: 15,
@@ -405,7 +392,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
     sets: [
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 1,
         weightKg: 85,
         reps: 6,
@@ -413,7 +399,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 2,
         weightKg: 82.5,
         reps: 8,
@@ -421,7 +406,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Overhead Press",
-        exerciseKey: "overhead press",
         setNumber: 1,
         weightKg: 52.5,
         reps: 8,
@@ -439,7 +423,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
     sets: [
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 1,
         weightKg: 0,
         reps: 8,
@@ -447,7 +430,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 2,
         weightKg: 0,
         reps: 6,
@@ -455,7 +437,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Pull-Up",
-        exerciseKey: "pull-up",
         setNumber: 3,
         weightKg: 0,
         reps: 5,
@@ -466,7 +447,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // Bench Press history (and, being older, loses to the 5-day session).
       {
         exerciseName: "bench press",
-        exerciseKey: "bench press",
         setNumber: 1,
         weightKg: 70,
         reps: 10,
@@ -474,7 +454,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Barbell Row",
-        exerciseKey: "barbell row",
         setNumber: 1,
         weightKg: 60,
         reps: 8,
@@ -482,7 +461,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Barbell Row",
-        exerciseKey: "barbell row",
         setNumber: 2,
         weightKg: 60,
         reps: 8,
@@ -501,7 +479,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // setNumber runs 1..5 for the squat …
       {
         exerciseName: "Back Squat",
-        exerciseKey: "back squat",
         setNumber: 1,
         weightKg: 140,
         reps: 5,
@@ -509,7 +486,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Back Squat",
-        exerciseKey: "back squat",
         setNumber: 2,
         weightKg: 135,
         reps: 5,
@@ -517,7 +493,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Back Squat",
-        exerciseKey: "back squat",
         setNumber: 3,
         weightKg: 130,
         reps: 5,
@@ -525,7 +500,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Back Squat",
-        exerciseKey: "back squat",
         setNumber: 4,
         weightKg: 125,
         reps: 5,
@@ -533,7 +507,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Back Squat",
-        exerciseKey: "back squat",
         setNumber: 5,
         weightKg: 120,
         reps: 5,
@@ -542,7 +515,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       // … and restarts at 1 for the next exercise.
       {
         exerciseName: "Romanian Deadlift",
-        exerciseKey: "romanian deadlift",
         setNumber: 1,
         weightKg: 100,
         reps: 8,
@@ -550,7 +522,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Romanian Deadlift",
-        exerciseKey: "romanian deadlift",
         setNumber: 2,
         weightKg: 95,
         reps: 8,
@@ -558,7 +529,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Romanian Deadlift",
-        exerciseKey: "romanian deadlift",
         setNumber: 3,
         weightKg: 90,
         reps: 10,
@@ -576,7 +546,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
     sets: [
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 1,
         weightKg: 80,
         reps: 8,
@@ -584,7 +553,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Bench Press",
-        exerciseKey: "bench press",
         setNumber: 2,
         weightKg: 77.5,
         reps: 10,
@@ -592,7 +560,6 @@ const WORKOUT_SESSION_FIXTURES: WorkoutSessionFixture[] = [
       },
       {
         exerciseName: "Overhead Press",
-        exerciseKey: "overhead press",
         setNumber: 1,
         weightKg: 50,
         reps: 10,
@@ -657,9 +624,13 @@ async function seedWorkoutSessions(
     });
 
     for (const [index, set] of fixture.sets.entries()) {
+      // The canonical key comes from the same pure helper the server action uses,
+      // so a fixture display name can never produce a key the app would not.
+      const exerciseKey = deriveExerciseKey(set.exerciseName);
+
       const columns = {
         exerciseName: set.exerciseName,
-        exerciseKey: set.exerciseKey,
+        exerciseKey,
         weightKg: set.weightKg,
         reps: set.reps,
         rpe: set.rpe,
@@ -670,7 +641,7 @@ async function seedWorkoutSessions(
         where: {
           sessionId_exerciseKey_setNumber: {
             sessionId: session.id,
-            exerciseKey: set.exerciseKey,
+            exerciseKey,
             setNumber: set.setNumber,
           },
         },

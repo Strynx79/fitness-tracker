@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { pickTopSet } from "@/lib/exercise";
 
 /**
  * Read model for Slice 3 — a workout session and its logged sets.
@@ -133,30 +134,6 @@ const SUGGESTION_SCAN_LIMIT = 300;
 
 /** Distinct exercises returned to the datalist. */
 const SUGGESTION_LIMIT = 50;
-
-/**
- * Rank two sets from the SAME session.
- *
- * Heaviest `weightKg` wins, then most `reps`, then the lowest `setNumber` (which
- * only matters when two sets are literally identical in weight and reps, and
- * makes the answer deterministic rather than dependent on row order).
- *
- * `weightKg` is `NOT NULL` in the schema, which is load-bearing here: a nullable
- * column would make Postgres's `ORDER BY ... DESC` put a raw bodyweight set
- * (`NULL`) first under its default NULLS FIRST, and the "heaviest" set would
- * silently become the one with no weight. A stored `0` is a real value and ranks
- * last only because it is the lightest, which is correct.
- */
-function ranksHigher(
-  candidate: { weightKg: number; reps: number; setNumber: number },
-  current: { weightKg: number; reps: number; setNumber: number },
-): boolean {
-  if (candidate.weightKg !== current.weightKg) {
-    return candidate.weightKg > current.weightKg;
-  }
-  if (candidate.reps !== current.reps) return candidate.reps > current.reps;
-  return candidate.setNumber < current.setNumber;
-}
 
 /**
  * One session with its sets and, per exercise, the previous session's top set.
@@ -291,64 +268,83 @@ export async function getWorkoutSession(
       orderBy: [{ session: { startedAt: "desc" } }, { setNumber: "asc" }],
     });
 
-    const bestByKey = new Map<
+    /**
+     * The scan is newest-session-first, so the first session seen per exercise is
+     * the one whose top set becomes the target. Rows are grouped per exercise and
+     * winning session here; `pickTopSet` (pure, unit-tested) does the ranking.
+     *
+     * RankedSet carries the session metadata alongside the three ranking fields,
+     * so the winning row alone can be turned into a `PreviousTopSet`.
+     */
+    type RankedSet = {
+      weightKg: number;
+      reps: number;
+      setNumber: number;
+      rpe: number | null;
+      sessionName: string;
+      performedAtIso: string;
+    };
+
+    const newestSessionByKey = new Map<
       string,
-      { topSet: PreviousTopSet; setNumber: number }
+      { sessionId: string; startedAtMs: number; sets: RankedSet[] }
     >();
-    // The winning session is identified by `id`, never by `startedAt`: two
-    // distinct sessions can share a timestamp (batch imports, tests, a clock
-    // with millisecond resolution), and treating them as one would mix their
-    // sets and attribute the wrong name/date to the target.
-    const bestSessionByKey = new Map<string, { id: string; startedAtMs: number }>();
 
     for (const row of candidates) {
       const startedAtMs = row.session.startedAt.getTime();
-      const currentSession = bestSessionByKey.get(row.exerciseKey);
-      const weightKg = row.weightKg.toNumber();
+      const current = newestSessionByKey.get(row.exerciseKey);
 
-      const topSet: PreviousTopSet = {
-        exerciseKey: row.exerciseKey,
-        weightKg,
+      const rankedSet: RankedSet = {
+        weightKg: row.weightKg.toNumber(),
         reps: row.reps,
+        setNumber: row.setNumber,
         rpe: row.rpe === null ? null : row.rpe.toNumber(),
         sessionName: row.session.name,
         performedAtIso: row.session.startedAt.toISOString(),
       };
 
-      // First row seen for this exercise, or a row from a strictly newer
-      // session: it becomes the target even when it is a bodyweight `0`.
-      if (currentSession === undefined || startedAtMs > currentSession.startedAtMs) {
-        bestByKey.set(row.exerciseKey, { topSet, setNumber: row.setNumber });
-        bestSessionByKey.set(row.exerciseKey, {
-          id: row.session.id,
+      // First row seen for this exercise, or a row from a strictly newer session:
+      // start collecting that session's sets, even when the weight is a bodyweight
+      // `0`.
+      if (current === undefined || startedAtMs > current.startedAtMs) {
+        newestSessionByKey.set(row.exerciseKey, {
+          sessionId: row.session.id,
           startedAtMs,
+          sets: [rankedSet],
         });
         continue;
       }
 
       // A different session — older, or the same instant but a different row —
-      // can never contribute to the newest session's top set.
-      if (row.session.id !== currentSession.id) continue;
+      // can never contribute to the newest session's top set. Sessions are
+      // identified by `id`, never `startedAt`: two distinct sessions can share a
+      // timestamp (batch imports, tests, a clock with millisecond resolution), and
+      // mixing them would attribute the wrong name/date to the target.
+      if (row.session.id !== current.sessionId) continue;
 
-      // Same session: pick its top set.
-      const current = bestByKey.get(row.exerciseKey);
-      if (current === undefined) continue;
-      if (
-        ranksHigher(
-          { weightKg, reps: row.reps, setNumber: row.setNumber },
-          {
-            weightKg: current.topSet.weightKg,
-            reps: current.topSet.reps,
-            setNumber: current.setNumber,
-          },
-        )
-      ) {
-        bestByKey.set(row.exerciseKey, { topSet, setNumber: row.setNumber });
-      }
+      current.sets.push(rankedSet);
+    }
+
+    const bestByKey = new Map<string, PreviousTopSet>();
+
+    for (const [exerciseKey, entry] of newestSessionByKey) {
+      // Heaviest wins, then most reps, then the lowest set number. A stored `0` is
+      // a real weight (bodyweight) and ranks last only because it is the lightest.
+      const topSet = pickTopSet(entry.sets);
+      if (topSet === null) continue;
+
+      bestByKey.set(exerciseKey, {
+        exerciseKey,
+        weightKg: topSet.weightKg,
+        reps: topSet.reps,
+        rpe: topSet.rpe,
+        sessionName: topSet.sessionName,
+        performedAtIso: topSet.performedAtIso,
+      });
     }
 
     for (const group of groups.values()) {
-      group.previousTopSet = bestByKey.get(group.exerciseKey)?.topSet ?? null;
+      group.previousTopSet = bestByKey.get(group.exerciseKey) ?? null;
     }
   }
 

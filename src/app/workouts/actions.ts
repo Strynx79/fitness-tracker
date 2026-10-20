@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { deriveExerciseKey } from "@/lib/exercise";
 import {
   createSessionSchema,
   deleteSetSchema,
@@ -81,23 +82,6 @@ function isUniqueViolation(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
   );
-}
-
-/**
- * The canonical exercise key: trim → collapse internal whitespace → lowercase.
- *
- * Derived HERE, from the already-validated (and trimmed) display name, rather
- * than in the schema: `exerciseKey` is a storage concern, not a form field. If
- * the client could submit the key it could disagree with the name it displayed,
- * and if the key were not derived "Bench Press" and "bench  press" would become
- * two different exercises — silently breaking the "beat your previous session"
- * callout, because the history query is keyed on `exerciseKey`.
- *
- * The display name is stored alongside it exactly as typed, so the UI still
- * shows "Bench Press" and not "bench press".
- */
-function deriveExerciseKey(exerciseName: string): string {
-  return exerciseName.replace(/\s+/g, " ").toLowerCase();
 }
 
 /**

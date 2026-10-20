@@ -876,3 +876,222 @@ src/app/workouts/actions.ts       + revalidatePath("/") in finishSession
 ### MVP status
 
 Slices 0–4 complete: daily metrics + macros with a 30-day trend, a habit engine with streaks and completion rates, a progressive-overload workout logger, and a unified dashboard. `npm run typecheck` is green and every route builds as Partial Prerender.
+
+---
+
+## 12. Slice 5 — Settings & Backup (execution record)
+
+Verified on 2026-10-20. No migration, no schema change.
+
+### Locked decisions
+
+| Decision | Choice |
+| --- | --- |
+| Location | Gear icon in the dashboard header → `/settings` (tab bar stays at four) |
+| Timezone input | Native `<select>` of IANA names |
+| Backup | Shipped in the same slice |
+
+### Files
+
+```
+src/lib/validations/profile.ts          isValidTimeZone + profileSchema
+src/lib/timezones.ts                    listTimezones(includeValue)
+src/app/settings/actions.ts             updateProfile
+src/app/settings/page.tsx + _components/ page, form, skeleton
+src/app/page.tsx                        gear link
+scripts/db-backup.sh                    pg_dump + gzip
+package.json / .gitignore / README.md   db:backup, backups/, restore docs
+```
+
+### The trap that would have shipped a lie
+
+`Intl.supportedValuesOf("timeZone")` returns **418 canonical names and omits `Asia/Kolkata`** —
+the canonical entry is `Asia/Calcutta`. The stored user timezone is the *alias*.
+
+Validating by list membership would have:
+- rejected the user's own existing value on save, and
+- rendered the select with **no matching option**, silently showing the first zone while the
+  database still held `Asia/Kolkata`.
+
+Validation is therefore **by construction** — `new Intl.DateTimeFormat("en-CA", { timeZone }).format()`
+in a try/catch — which accepts aliases exactly as `Intl` does everywhere else. `listTimezones()`
+re-injects the current value so an alias always renders. The `RangeError` is the real failure mode
+being guarded: `todayIso()` runs on every page, so one bad row would take the whole app down.
+
+### Cross-cutting rule
+
+Changing the timezone moves what counts as "today" for every feature, so `updateProfile` revalidates
+`/settings`, `/`, `/metrics`, `/habits` and `/workouts`. Same class of bug as the dashboard
+revalidation gap fixed in §11.
+
+### Backup
+
+`npm run db:backup` writes a timestamped, `0600`-mode, gzipped `pg_dump` with
+`--clean --if-exists` into the gitignored `backups/`.
+
+### QA follow-ups applied
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | A same-second run **deleted the previous good backup**: gzip refuses to overwrite, `set -e` fired the cleanup trap, and the trap removed both files. | A `noclobber` reservation makes the loser exit non-zero having touched nothing; the trap only removes files the run created. The earlier backup's checksum was verified unchanged. |
+| S2 | The documented restore was wrong: plain-format dumps contain `CREATE TABLE`, so restoring over a populated DB fails — and without `ON_ERROR_STOP` psql **keeps going and exits 0**, leaving a silent half-restore. | `--clean --if-exists` on the dump; `-v ON_ERROR_STOP=1` in the documented command; the README states that restoring replaces data. |
+| N1 | Fragile `head \| grep -q` header check (SIGPIPE under `pipefail`). | `grep -q 'PostgreSQL database dump' "$OUT"`. |
+| N2 | Dump was created mode `0644` with all personal data in it. | `umask 077` → `600`. |
+| N3 | Timezone injection was untrimmed. | Trim, and skip blanks. |
+| N4 | Neither control was linked to its hint or error text. | `aria-describedby`, including the error id only when one exists. |
+| N5 | Copy claimed the values affect "dashboard, habits and metrics". | Now includes workout times. |
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `lint` / `build` | ✅ 0 errors / clean / `/settings` = `◐` |
+| Backup round-trip | ✅ dump → restore into scratch DB → identical counts (`1/32/6/47/6/31`) |
+| Double restore over populated DB | ✅ both applications exit 0 with `ON_ERROR_STOP` |
+| Collision test | ✅ loser exits 1; first backup checksum unchanged |
+| File mode | ✅ `600` (was `644`) |
+| Alias handling | ✅ `Asia/Kolkata` accepted, present **and selected** in the rendered select |
+| Invalid timezone | ✅ rejected server-side, DB unchanged |
+| Goal clearing | ✅ `null` persisted; `0` rejected by the range |
+
+### Known gaps
+
+- No UI to *restore* a backup — a documented one-liner only.
+- Both an alias and its canonical name are accepted (two different strings, one zone). Harmless, but
+  two users could store different spellings of the same zone.
+- No auth (carried since §7).
+
+---
+
+## 13. Slice 6 — Regression Tests (execution record)
+
+Verified on 2026-10-20. No migration, no UI change, no new dependencies.
+
+### Scope
+
+Unit tests for the rules that make the app correct — and the extraction required to make those rules
+testable at all. `npm run verify` (typecheck + lint + tests) is now the project's definition of done.
+
+### The bug the baseline found before any refactor
+
+Capturing the current checklist output *before* touching code immediately surfaced
+`10k Steps` reporting **150%**.
+
+Mechanism: `createdAt` is `2026-10-19 01:00 IST` (the deliberate timezone fixture, stored as
+`2026-10-18T19:30Z`), so `daysAlive` is 2 and the denominator is 2. But a log row existed on
+**Oct 18 — before the habit existed** — and the numerator counted every completion in the 7-day
+window regardless. 3 / 2 = 150%.
+
+This is reachable in production, not just a seed artifact: `toggleHabit` accepts any
+`date <= today`, including dates before the habit was created. There is no backfill UI yet, but the
+action permits it, and any future one would hit this immediately.
+
+**Fix:** intersect the rate window with the habit's lifetime, rather than clamping the result:
+
+```ts
+const lifetimeStart = createdLocalDate > rateWindowStart ? createdLocalDate : rateWindowStart;
+const completedInWindow = rateWindow.reduce(
+  (count, date) => (date >= lifetimeStart && dates.has(date) ? count + 1 : count), 0,
+);
+```
+
+Clamping at 100 would have hidden the inconsistency and kept the tests unable to tell the
+difference — which is exactly the hole the audit later found.
+
+### Extractions (the point of the slice)
+
+The rules worth testing lived inside DB-fetching functions guarded by `import "server-only"`, so a
+plain `node --test` could not import them. They are now pure modules with no `server-only`, Prisma or
+Next imports:
+
+| Module | Exports | Delegating caller |
+| --- | --- | --- |
+| `src/lib/habit-stats.ts` | `computeHabitStats`, `STREAK_WINDOW_DAYS`, `RATE_WINDOW_DAYS` | `habits.ts` |
+| `src/lib/exercise.ts` | `deriveExerciseKey`, `pickTopSet` | `workouts.ts`, `workouts/actions.ts`, **`prisma/seed.ts`** |
+| `src/lib/weight-summary.ts` | `summarizeWeight` | `daily-metrics.ts` |
+| `src/lib/weight-series.ts` | `buildWeightSeries`, `WeightPoint` | `daily-metrics.ts` (re-exported, so UI imports are unchanged) |
+
+Bonus: `prisma/seed.ts` now derives every `exerciseKey` from the real function instead of
+hand-writing 31 duplicated keys, removing a documented drift risk.
+
+### Tests — 58 across 6 files
+
+| File | Count | Pins |
+| --- | --- | --- |
+| `tests/date.test.ts` | 9 | invalid calendar dates, DST-safe day arithmetic, range cap, `isoDateInZone` boundary |
+| `tests/habit-stats.test.ts` | 20 | grace rule, capped denominator, rounding, the FIX 0 lifetime intersection, 365-day streak cap, `last7Days` shape |
+| `tests/exercise.test.ts` | 8 | key canonicalization, top-set ranking, bodyweight `0`, no mutation |
+| `tests/weight-summary.test.ts` | 12 | every null combination, sign convention, 2dp rounding |
+| `tests/validation.test.ts` | 12 | the **shipped** schemas: blank→null vs real `0`, precision, bounds, timezone aliases |
+| `tests/weight-series.test.ts` | 3 | every day present, nulls for gaps, ascending |
+
+Tests import only pure modules: no database, no network, no ambient clock. Verified identical under
+`TZ=America/New_York`, `TZ=Asia/Kolkata` and `TZ=UTC`.
+
+### Behavioural equivalence — proven, not assumed
+
+The acceptance criterion for a refactor of working code is identical behaviour, so:
+
+1. Captured a probe of every habit's `streak` / `streakCapped` / `completionRate7d` /
+   `checkedToday` / 7-day strip, both top sets, and the whole weight summary.
+2. Restored the **HEAD** versions of `habits.ts`, `workouts.ts`, `daily-metrics.ts`, ran the same
+   probe against the **same live data**, then restored the refactor and re-ran.
+3. The diff contains exactly one line: `10k Steps` `150 → 100` — the intended fix.
+
+The first comparison had a second diff (`Hit Protein Goal` 12→13), which turned out to be a *data*
+change: a reseed restored the fixture log that had been unticked during manual testing. Running old
+and new code against identical data isolated the logic change from the data change.
+
+### Mutation probes — all executed
+
+Six production mutations, each confirmed to turn the suite red, then restored byte-identically:
+
+| Mutation | Fails |
+| --- | --- |
+| `Math.min(7, daysAlive)` → `daysAlive` | 1 |
+| remove `Math.round` | 1 |
+| lifetime filter → post-hoc clamp at 100 | 2 |
+| grace anchor → "today only" | 3 |
+| `pickTopSet` `setNumber <` → `>` | 1 |
+| remove the 365-day streak `break` | 1 |
+
+### QA follow-ups applied
+
+The audit found that the two most important rules were **effectively untested** — a green suite that
+would not have caught a real regression:
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| S1 | Every non-zero rate test used a creation date ≤ 3 days old, where `min(7, daysAlive)` is a no-op. Deleting the cap kept all 48 tests green while every habit older than a week would report `3/31` instead of `3/7`. Rounding was likewise unpinned (0 and 100 are exact). | Added a week-old cap case (expects 100; unclamped gives 88) and a 1-of-3 case (expects 33; unrounded gives 33.33…). |
+| S2 | The FIX 0 tests asserted only `100`, so replacing the lifetime filter with a clamp kept them green — the exact anti-pattern the code comment warns against. | Added a discriminator: created yesterday, ticked the pre-creation day and yesterday but not today → **50** correctly, **100** under a clamp. |
+| S3 | `validation.test.ts` tested **cloned** schemas, not the shipped ones. Drift had already occurred: it asserted `"Enter weight."`, which the app never emits (real copy is `"Enter the weight. Use 0 for bodyweight."`). | Rewritten against `logSetSchema`, `profileSchema`, `createHabitSchema` and `dailyMetricInputSchema`, asserting exact production messages. |
+| N1 | Decorative NaN test (`Number.isNaN(null) === false` passes for `null` or `undefined`). | Replaced with exact per-combination expectations. |
+| N2 | Unreachable `assert.ok(rate <= 100)` after `assert.equal(rate, 100)`. | Removed. |
+| N3 | Expected dates computed with the production `isoDateRange`/`addDays` (circular). | Hardcoded. |
+| N4 | Tautological sort assertion in the weight-series test. | Removed. |
+| N5 | `last7Days` marks a pre-creation completion as `true` while the rate excludes it. | Kept as raw logged truth, now commented **and** pinned by a test. |
+| N6 | `AGENTS.md` Role Separation still told QA to run only `typecheck`. | Now says `npm run verify`. |
+
+### Tooling
+
+```jsonc
+"test":   "node --import tsx --test \"tests/*.test.ts\"",
+"verify": "npm run typecheck && npm run lint && npm run test"
+```
+
+`node --test` is built in; `tsx` was already a devDependency. No new packages. `tsc` already covers
+`tests/` via the `**/*.ts` include, so the tests are typechecked too.
+
+### Known gaps (documented, not accidental)
+
+- **The Slice 3 concurrency invariant is not regression-tested.** "A finished session never gains a
+  set" needs a live database and racing transactions; it is covered only by the one-off 24-run proof
+  from §10.
+- Components, Server Actions and the DB read functions are not unit tested. This slice deliberately
+  targets the pure rules, where silent regressions actually live.
+
+### Project status
+
+Six slices, all committed, `npm run verify` green (58 tests). Every route builds as Partial
+Prerender. The two correctness bugs outstanding after Slice 4 — unsettable timezone and goal — were
+closed in §11; the completion-rate bug was closed here.

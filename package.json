@@ -11,6 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --import tsx --test \"tests/*.test.ts\"",
+    "verify": "npm run typecheck && npm run lint && npm run test",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "prisma migrate reset && prisma db seed",

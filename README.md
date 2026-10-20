@@ -33,6 +33,38 @@ npm run dev                 # http://localhost:3000
 | `npm run db:up` / `db:down` | Start / stop local Postgres |
 | `npm run db:reset` | Drop, re-migrate, and re-seed |
 | `npm run db:seed` | Seed the dev user (idempotent) |
+| `npm run db:backup` | Timestamped gzipped `pg_dump` into `backups/` |
+
+## Backup & restore
+
+`npm run db:backup` writes `backups/fitness-os-<YYYYmmdd-HHMMSS>.sql.gz` — a gzipped
+plain-SQL `pg_dump` taken inside the Postgres container. The dump is created with
+`--clean --if-exists`, so it drops and recreates its own objects and can be restored over
+an existing database. `backups/` is gitignored, and dumps are created mode `0600`
+(they contain personal data).
+
+> **Warning:** restoring **replaces the existing data**. `--clean` drops the tables in the
+> dump before recreating them, so every row currently in the target database's dumped
+> tables is destroyed. Stop the app, take a fresh backup first, and use
+> `-v ON_ERROR_STOP=1` so psql aborts instead of continuing after an error (without it,
+> a failed restore can leave the database half-applied while still exiting 0).
+
+Restore a dump over the running database (same command restores into an empty database):
+
+```bash
+gunzip -c backups/<file>.sql.gz | docker exec -i fitness-os-postgres psql -v ON_ERROR_STOP=1 -U fitness -d fitness_os
+```
+
+To try a dump without touching the live data, restore into a scratch database first:
+
+```bash
+docker exec fitness-os-postgres createdb -U fitness fitness_os_verify
+gunzip -c backups/<file>.sql.gz | docker exec -i fitness-os-postgres psql -v ON_ERROR_STOP=1 -U fitness -d fitness_os_verify
+docker exec fitness-os-postgres dropdb -U fitness fitness_os_verify
+```
+
+> **Warning:** `docker compose down -v` destroys the Postgres data volume and all data in it.
+> Use `npm run db:down` to stop the container without deleting the database.
 
 ## Architecture
 

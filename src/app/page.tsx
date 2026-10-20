@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
+import { Settings } from "lucide-react";
 
 import {
   HabitsCardSkeleton,
@@ -9,8 +11,10 @@ import {
 import { LastWorkout } from "@/app/_components/last-workout";
 import { TodayHabits } from "@/app/_components/today-habits";
 import { WeightCard } from "@/app/_components/weight-card";
+import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth";
 import { parseIsoDate, todayIso } from "@/lib/date";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -44,17 +48,35 @@ const FRIENDLY_DATE = new Intl.DateTimeFormat("en-US", {
 export default function DashboardPage() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
+      <header className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
 
-        {/* The only header fragment that needs the user's timezone. */}
-        <Suspense
-          fallback={
-            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-          }
+          {/* The only header fragment that needs the user's timezone. */}
+          <Suspense
+            fallback={
+              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+            }
+          >
+            <DashboardDate />
+          </Suspense>
+        </div>
+
+        {/*
+          Settings is deliberately not a fifth tab: the bottom bar is for daily
+          use, and this is a rare trip. An icon-only link needs an accessible
+          name, and size-11 keeps the tap target at 44px.
+        */}
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "icon-lg" }),
+            "size-11 shrink-0",
+          )}
         >
-          <DashboardDate />
-        </Suspense>
+          <Settings aria-hidden className="size-5" />
+        </Link>
       </header>
 
       <div className="flex flex-col gap-5">

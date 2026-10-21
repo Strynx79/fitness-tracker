@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 
@@ -34,12 +34,20 @@ export default function ErrorBoundary({
   retry: () => void;
 }) {
   const digest = getErrorDigest(error);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     // Keep the full value in the browser console for local debugging. It is
     // never rendered: `error.message` can leak server-side details.
     console.error(error);
   }, [error]);
+
+  // The boundary replaces the route, so focus would otherwise stay on a node
+  // that no longer exists. Move it to the heading so screen readers announce
+  // the failure instead of silently doing nothing.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-4 px-4 py-6">
@@ -52,7 +60,11 @@ export default function ErrorBoundary({
             <TriangleAlert className="size-5" />
           </span>
 
-          <h1 className="font-heading text-xl leading-snug font-semibold tracking-tight">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="font-heading text-xl leading-snug font-semibold tracking-tight outline-none"
+          >
             Something went wrong
           </h1>
           <CardDescription className="max-w-[40ch] text-balance">

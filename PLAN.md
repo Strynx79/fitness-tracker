@@ -1105,7 +1105,8 @@ Verified on 2026-10-21. No migration, no schema change, no UI feature.
 ### Scope
 
 Make the project enforce its own standards and degrade gracefully: CI, error boundaries, and a
-license. Three concerns, one slice, one commit.
+license. Three concerns, one slice, two commits — the second only adds `workflow_dispatch`, because
+GitHub did not register the workflow from the first push (see below).
 
 ### CI — `.github/workflows/verify.yml`
 
@@ -1121,6 +1122,21 @@ single file with zero configuration.
 **Deliberately not included: `next build`.** Partial Prerender can execute database reads at build
 time, which would require a Postgres service container. Rather than guess, the build was validated
 locally (below) and the workflow stays honest about what it covers.
+
+### The workflow GitHub refused to see
+
+The first push containing the workflow produced **nothing**: `actions/workflows` returned
+`total_count: 0`, the Actions page said "There are no workflow runs yet", and the workflow resource
+404'd — while the file was byte-identical on the remote, YAML parsed cleanly, and Actions was enabled
+for the repository. It was not propagation lag in any useful sense: four checks over ~2 minutes all
+returned zero.
+
+Adding `workflow_dispatch` and pushing again registered it immediately (`state: active`), and the run
+for the original commit then appeared and passed. The published file is unchanged apart from that
+trigger, plus `permissions: contents: read` and `NEXT_TELEMETRY_DISABLED`.
+
+Practical rule for this repo: after adding a workflow, confirm it appears in
+`gh api repos/.../actions/workflows` — a clean `git push` is not evidence that CI will run.
 
 ### Error boundaries
 
@@ -1181,6 +1197,8 @@ error occurs — the boundary renders client-side, which is expected, not a fail
 - `.github/` and the README badge were added; the README's stale status section (still claiming
   "Slice 0 complete") and its `typecheck`-only definition of done were corrected to `verify`.
 - `LICENSE` added (MIT, 2026).
+- The production build in the table above was **re-run on the final tree** after the probe route was
+  deleted, so `.next` contains no trace of it.
 - `.opencode/MEMORY.md` is gitignored — it is local session state, while `.opencode/skills/` and
   `.opencode/agents/` remain tracked.
 

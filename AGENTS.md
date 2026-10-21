@@ -28,5 +28,5 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 ## Session Memory & Handoff
-- Always read `.opencode/MEMORY.md` at the start of a session to restore current progress, architectural decisions, and known traps.
+- Always read `.opencode/MEMORY.md` at the start of a session (if it exists) to restore current progress, architectural decisions, and known traps.
 - Before ending a milestone or when invoked via `/session-handoff`, update `.opencode/MEMORY.md` with any newly discovered traps or completed tasks.

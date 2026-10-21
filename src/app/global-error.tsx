@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Root layout failures replace the whole document, so global CSS is not
@@ -45,6 +45,7 @@ const STYLES = `
     margin: 0 0 8px;
     font-size: 1.25rem;
     line-height: 1.3;
+    outline: none;
   }
   .ge-copy {
     margin: 0 0 20px;
@@ -125,10 +126,16 @@ export default function GlobalError({
   retry: () => void;
 }) {
   const digest = getErrorDigest(error);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     console.error(error);
   }, [error]);
+
+  // Root-layout failures replace the whole document, so focus is lost entirely.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   return (
     // global-error replaces the root layout, so it must provide the document.
@@ -140,7 +147,9 @@ export default function GlobalError({
         <main className="ge-main">
           <div className="ge-card">
             <p className="ge-eyebrow">Fitness OS</p>
-            <h1 className="ge-title">Something went wrong</h1>
+            <h1 ref={headingRef} tabIndex={-1} className="ge-title">
+              Something went wrong
+            </h1>
             <p className="ge-copy">
               The app could not load. Try again — if that does not work, reload
               the page from the home screen.

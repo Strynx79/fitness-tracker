@@ -98,7 +98,8 @@ prisma.config.ts       Prisma 7 CLI config (schema, migrations, seed, datasource
 ## Status
 
 All six feature slices are complete. `npm run verify` runs the typecheck, lint and 58 unit tests;
-the same command runs in CI on every push and pull request (`.github/workflows/verify.yml`).
+the same command runs in CI on every push to `main` and every pull request
+(`.github/workflows/verify.yml`).
 
 Error boundaries (`error.tsx`, `global-error.tsx`, `not-found.tsx`) keep a failed database read
 from blanking a page. Known gaps — no authentication, the workout concurrency invariant covered

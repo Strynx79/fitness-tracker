@@ -1,5 +1,7 @@
 # Fitness & Self-Improvement OS
 
+[![Verify](https://github.com/Strynx79/fitness-tracker/actions/workflows/verify.yml/badge.svg)](https://github.com/Strynx79/fitness-tracker/actions/workflows/verify.yml)
+
 Track daily body weight and macros, build self-improvement habits with streaks, and log
 progressive-overload workouts.
 
@@ -91,8 +93,17 @@ prisma.config.ts       Prisma 7 CLI config (schema, migrations, seed, datasource
   `getCurrentUser()`. Auth is not implemented yet — the MVP resolves a single seeded dev user
   (`usr_local_dev`).
 - **Slices.** Features are built one vertical slice at a time (Database → Server Action → UI → QA).
-  A slice is not done until `npm run typecheck` reports 0 errors.
+  A slice is not done until `npm run verify` (typecheck + lint + tests) passes with 0 errors.
 
 ## Status
 
-Slice 0 (bootstrapping) complete. Feature slices 1–4 are tracked in `PLAN.md` and `PRD.md`.
+All six feature slices are complete. `npm run verify` runs the typecheck, lint and 58 unit tests;
+the same command runs in CI on every push and pull request (`.github/workflows/verify.yml`).
+
+Error boundaries (`error.tsx`, `global-error.tsx`, `not-found.tsx`) keep a failed database read
+from blanking a page. Known gaps — no authentication, the workout concurrency invariant covered
+only by a manual proof, and no restore UI — are documented in `PLAN.md`.
+
+## License
+
+[MIT](LICENSE)

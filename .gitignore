@@ -32,6 +32,9 @@ Thumbs.db
 # logs
 *.log
 
+# agent session memory (local working state; skills and agents are tracked)
+.opencode/MEMORY.md
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -1,0 +1,40 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch cancels the run it superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck + lint + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # `postinstall` runs `prisma generate`, which builds src/generated/ — that
+      # directory is gitignored, so it must be regenerated here.
+      # prisma.config.ts intentionally omits the datasource when DATABASE_URL is
+      # unset, so no database and no secrets are needed for this job.
+      - name: Install
+        run: npm ci
+
+      # typecheck + lint + unit tests. The tests import pure modules only.
+      # A production `next build` is deliberately NOT part of this job: Partial
+      # Prerender can execute database reads at build time, which would require
+      # a Postgres service container. Verify locally before releasing.
+      - name: Verify
+        run: npm run verify

@@ -1095,3 +1095,98 @@ would not have caught a real regression:
 Six slices, all committed, `npm run verify` green (58 tests). Every route builds as Partial
 Prerender. The two correctness bugs outstanding after Slice 4 — unsettable timezone and goal — were
 closed in §11; the completion-rate bug was closed here.
+
+---
+
+## 14. Slice 7 — Delivery Hardening (execution record)
+
+Verified on 2026-10-21. No migration, no schema change, no UI feature.
+
+### Scope
+
+Make the project enforce its own standards and degrade gracefully: CI, error boundaries, and a
+license. Three concerns, one slice, one commit.
+
+### CI — `.github/workflows/verify.yml`
+
+Node 24 (matching the local `v24.22.0`; `engines` allows `>=22`), `npm ci`, `npm run verify`, with a
+concurrency group so a new push cancels the superseded run.
+
+The job needs **no database and no secrets**. `src/generated/` is gitignored, so the Prisma client
+must be rebuilt in CI — `postinstall` already runs `prisma generate`, and `prisma.config.ts`
+deliberately omits `datasource` when `DATABASE_URL` is unset, so the generate step succeeds on a
+bare checkout. That tolerance was written in Slice 0 for fresh clones; it is what makes this job a
+single file with zero configuration.
+
+**Deliberately not included: `next build`.** Partial Prerender can execute database reads at build
+time, which would require a Postgres service container. Rather than guess, the build was validated
+locally (below) and the workflow stays honest about what it covers.
+
+### Error boundaries
+
+| File | Behaviour |
+| --- | --- |
+| `src/app/error.tsx` | Route-level boundary: friendly copy, `retry()`, link home |
+| `src/app/global-error.tsx` | Root-layout failure: own `<html>`/`<body>`, inline theme-aware CSS |
+| `src/app/not-found.tsx` | 404 with a link home |
+
+### The trap this Next version sets
+
+The boundary prop is **`retry`**, not `reset`. `reset` still exists, but the docs say "In most cases,
+you should use `retry()` instead" — `retry()` re-fetches, `reset()` only clears the error without
+re-fetching. Writing `reset` from memory would have produced a button that appears to work and
+leaves the broken data in place. `error` is also typed `unknown` here, so it is narrowed with
+`instanceof Error` before `digest` is read.
+
+Two more constraints found by reading the local docs rather than assuming:
+
+- `global-error.tsx` replaces the root layout, so it must render its own `<html>` and `<body>`, and
+  it cannot export `metadata` — the title uses React's `<title>` component instead.
+- Server Component errors arrive with a **generic message** and a `digest` log identifier. Only the
+  digest is surfaced; rendering `error.message` would leak server internals.
+
+The plain `<a href="/">` in `global-error` is intentional — when the root layout is what failed, a
+client-side navigation is not trustworthy, so a full document load is required. It is the one place
+`@next/next/no-html-link-for-pages` is suppressed, and the directive was confirmed to be *used*
+(`--report-unused-disable-directives` reports nothing) rather than inert.
+
+### Verification — and the three false passes it caught
+
+1. **Probe route returned 404, not the boundary.** Folders prefixed with `_` are private in the App
+   Router, so `src/app/__error-probe` was never routable. Renamed to `error-probe`.
+2. **Boundary did not render in `next dev`.** Development serves a bare `__next_error__` document and
+   lets the overlay take over, so dev output proves nothing about the fallback UI. The probe was
+   rebuilt into a **production** build and run under `next start`.
+3. **`connection()` alone broke the build.** With `cacheComponents`, request-time data outside
+   `<Suspense>` fails prerendering; the segment needs `export const instant = false` to opt into
+   blocking. The probe throws at request time instead of build time.
+
+Final production result: `/error-probe` → the throw is server-logged, the RSC payload carries the
+digest but **not** the message, and the fallback component is present in the client bundle
+(`.next/static/chunks/*`). The route's HTTP status is `200` because the shell streams before the
+error occurs — the boundary renders client-side, which is expected, not a failure.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | ✅ 0 errors |
+| `npm run lint` | ✅ clean |
+| `npm run verify` | ✅ 58/58 tests |
+| `npm run build` | ✅ exit 0; every route still `◐`, `/_not-found` now `○` |
+| Not-found boundary | ✅ `404` + rendered copy |
+| Error boundary | ✅ logged server-side, digest forwarded, message not leaked, fallback in bundle |
+| GET `/`, `/habits`, `/metrics`, `/workouts`, `/settings` | ✅ 200 in production |
+
+### Housekeeping
+
+- `.github/` and the README badge were added; the README's stale status section (still claiming
+  "Slice 0 complete") and its `typecheck`-only definition of done were corrected to `verify`.
+- `LICENSE` added (MIT, 2026).
+- `.opencode/MEMORY.md` is gitignored — it is local session state, while `.opencode/skills/` and
+  `.opencode/agents/` remain tracked.
+
+### Known gaps
+
+- No browser is available in this environment, so the boundary's *client-side render* was verified by
+  bundle presence plus the absence of a message leak, not by executing React. A human click-test of
+  "Try again" is still worthwhile.
+- CI runs `verify` only; a production build still has to be run locally before releasing.

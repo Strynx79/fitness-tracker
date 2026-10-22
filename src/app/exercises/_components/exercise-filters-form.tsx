@@ -4,6 +4,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/select";
 import { capitalizeExerciseName } from "@/lib/exercise";
 import { cn } from "@/lib/utils";
 
@@ -15,17 +16,17 @@ type ExerciseFiltersFormProps = {
   equipment: string[];
 };
 
-/** Matches `Input`'s own classes so a native `<select>` sits level with it. */
-const SELECT_CLASSES =
-  "h-12 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
-
 /**
  * Search + facet filters.
  *
- * A plain `method="get"` form on purpose: filtering the catalog works with no
- * JavaScript at all, the URL is the state (so a filtered view is shareable and
+ * A `method="get"` form on purpose: the URL is the state (shareable, and
  * back/forward behave), and the page itself stays a Server Component. Submitting
  * never posts `page`, which is what sends a new search back to page 1.
+ *
+ * The facet controls are the custom `SelectField` rather than native `<select>`s:
+ * a native popup is drawn by the browser with its own font, which is exactly the
+ * mismatch this screen used to have. They need JavaScript to open, so typing in
+ * the search box and pressing Enter remains the no-JS path.
  */
 export function ExerciseFiltersForm({
   filters,
@@ -55,36 +56,34 @@ export function ExerciseFiltersForm({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="exercise-body-part">Body part</FieldLabel>
-              <select
+              <SelectField
                 id="exercise-body-part"
                 name="bodyPart"
                 defaultValue={filters.bodyPart}
-                className={SELECT_CLASSES}
-              >
-                <option value="">All body parts</option>
-                {bodyParts.map((bodyPart) => (
-                  <option key={bodyPart} value={bodyPart}>
-                    {capitalizeExerciseName(bodyPart)}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "All body parts" },
+                  ...bodyParts.map((bodyPart) => ({
+                    value: bodyPart,
+                    label: capitalizeExerciseName(bodyPart),
+                  })),
+                ]}
+              />
             </Field>
 
             <Field>
               <FieldLabel htmlFor="exercise-equipment">Equipment</FieldLabel>
-              <select
+              <SelectField
                 id="exercise-equipment"
                 name="equipment"
                 defaultValue={filters.equipment}
-                className={SELECT_CLASSES}
-              >
-                <option value="">All equipment</option>
-                {equipment.map((item) => (
-                  <option key={item} value={item}>
-                    {capitalizeExerciseName(item)}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "All equipment" },
+                  ...equipment.map((item) => ({
+                    value: item,
+                    label: capitalizeExerciseName(item),
+                  })),
+                ]}
+              />
             </Field>
           </div>
 

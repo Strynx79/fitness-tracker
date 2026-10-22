@@ -25,12 +25,16 @@ export type ExerciseSummary = {
   bodyPart: string;
   target: string;
   muscleGroup: string | null;
+  /** Dataset-relative thumbnail path, e.g. `images/0025-EIeI8Vf.jpg`. */
+  imagePath: string | null;
 };
 
 /** One exercise, as its detail page renders it. */
 export type ExerciseDetail = ExerciseSummary & {
   id: string;
   category: string;
+  /** Dataset-relative animation path, e.g. `videos/0025-EIeI8Vf.gif`. */
+  gifPath: string | null;
   secondaryMuscles: string[];
   instructionsEn: string;
   stepsEn: string[];
@@ -111,6 +115,7 @@ const SUMMARY_SELECT = {
   bodyPart: true,
   target: true,
   muscleGroup: true,
+  imagePath: true,
 } satisfies Prisma.ExerciseSelect;
 
 /**
@@ -196,6 +201,8 @@ export async function getExercise(datasetId: string): Promise<ExerciseDetail | n
       equipment: true,
       target: true,
       muscleGroup: true,
+      imagePath: true,
+      gifPath: true,
       secondaryMuscles: true,
       instructionsEn: true,
       stepsEn: true,

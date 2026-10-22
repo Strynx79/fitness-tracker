@@ -14,14 +14,15 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { capitalizeExerciseName } from "@/lib/exercise";
+import {
+  GYM_VISUAL_ATTRIBUTION,
+  exerciseMediaUrl,
+} from "@/lib/exercise-media";
 import { getExercise } from "@/lib/exercises";
 import { getCurrentUser } from "@/lib/auth";
 import { todayIso, addDays } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { getInProgressSession } from "@/lib/workouts";
-
-/** Canonical attribution string; the media licence requires it verbatim. */
-const MEDIA_ATTRIBUTION = "© Gym visual — https://gymvisual.com/";
 
 type ExerciseDetailContentProps = {
   params: PageProps<"/exercises/[datasetId]">["params"];
@@ -53,6 +54,8 @@ export async function ExerciseDetailContent({
   if (exercise === null) notFound();
 
   const name = capitalizeExerciseName(exercise.name);
+  // Hotlinked dataset media; `null` when the row has no path or an unexpected one.
+  const gifUrl = exerciseMediaUrl(exercise.gifPath);
 
   // The dataset repeats muscles across `target`, `muscle_group` and
   // `secondary_muscles` ("abs" often appears in all three). Render each once,
@@ -84,6 +87,31 @@ export async function ExerciseDetailContent({
           </Badge>
         </div>
       </header>
+
+      {gifUrl === null ? null : (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2">
+            {/*
+              A plain <img>, not next/image: this is a 180×180 animated GIF, the
+              optimizer would need remotePatterns for the dataset host and adds
+              nothing at this size. Hotlinked on purpose — the media is © Gym
+              visual and is not vendored into this repository.
+            */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={gifUrl}
+              alt={`${name} demonstration`}
+              width={180}
+              height={180}
+              loading="lazy"
+              className="bg-muted size-[180px] rounded-lg border object-contain"
+            />
+            <p className="text-muted-foreground text-[0.7rem]">
+              {GYM_VISUAL_ATTRIBUTION}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -196,7 +224,7 @@ export async function ExerciseDetailContent({
       <footer className="flex flex-col gap-1 pb-2">
         <p className="text-muted-foreground text-xs">
           {/* Verbatim, licence-bearing: do not reword or truncate. */}
-          {exercise.attribution || MEDIA_ATTRIBUTION}
+          {exercise.attribution || GYM_VISUAL_ATTRIBUTION}
         </p>
         <p className="text-muted-foreground/80 text-xs">
           Exercise data from the Exercises Dataset (MIT). Media © Gym visual and

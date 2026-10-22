@@ -10,6 +10,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { capitalizeExerciseName } from "@/lib/exercise";
+import {
+  GYM_VISUAL_ATTRIBUTION,
+  exerciseMediaUrl,
+} from "@/lib/exercise-media";
 import { EXERCISES_PAGE_SIZE, getExerciseFacets, searchExercises } from "@/lib/exercises";
 
 import { ExerciseFiltersForm } from "./exercise-filters-form";
@@ -109,13 +113,34 @@ export async function ExerciseLibrary({ searchParams }: ExerciseLibraryProps) {
                   href={`/exercises/${exercise.datasetId}`}
                   className="hover:bg-muted/50 focus-visible:ring-ring/50 flex min-h-14 items-center justify-between gap-3 px-4 py-3 transition-colors focus-visible:ring-3 focus-visible:outline-none"
                 >
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm font-medium">
-                      {capitalizeExerciseName(exercise.name)}
-                    </span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      {capitalizeExerciseName(exercise.equipment)} ·{" "}
-                      {capitalizeExerciseName(exercise.target)}
+                  <span className="flex min-w-0 flex-1 items-center gap-3">
+                    {/*
+                      Plain <img>: 180×180 source rendered at 48px, so the
+                      Next image optimizer would add a remote pattern and a
+                      resize hop for no visible gain. Hotlinked, not vendored —
+                      the media is © Gym visual.
+                    */}
+                    {exerciseMediaUrl(exercise.imagePath) === null ? null : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={exerciseMediaUrl(exercise.imagePath) ?? ""}
+                        alt=""
+                        aria-hidden
+                        width={48}
+                        height={48}
+                        loading="lazy"
+                        className="bg-muted size-12 shrink-0 rounded-md border object-cover"
+                      />
+                    )}
+
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm font-medium">
+                        {capitalizeExerciseName(exercise.name)}
+                      </span>
+                      <span className="text-muted-foreground truncate text-xs">
+                        {capitalizeExerciseName(exercise.equipment)} ·{" "}
+                        {capitalizeExerciseName(exercise.target)}
+                      </span>
                     </span>
                   </span>
 
@@ -136,6 +161,10 @@ export async function ExerciseLibrary({ searchParams }: ExerciseLibraryProps) {
       </Card>
 
       <ExercisePagination filters={filters} page={page} pageCount={pageCount} />
+
+      <p className="text-muted-foreground px-1 text-[0.7rem]">
+        {GYM_VISUAL_ATTRIBUTION}
+      </p>
     </div>
   );
 }

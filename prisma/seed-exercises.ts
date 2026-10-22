@@ -22,7 +22,15 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is not set. Copy .env.example to .env.");
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({
+    connectionString,
+    keepAlive: true,
+    connectionTimeoutMillis: 30_000,
+    idleTimeoutMillis: 30_000,
+    max: 5,
+  }),
+});
 
 async function main(): Promise<void> {
   const catalog = await seedExerciseCatalog(prisma);

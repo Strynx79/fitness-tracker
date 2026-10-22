@@ -33,6 +33,8 @@ type SessionHeaderProps = {
   notes: string | null;
   /** Already formatted server-side in the user's timezone. */
   startedAtLabel: string;
+  /** Calendar date label when the workout was planned ahead; `null` if not. */
+  scheduledForLabel: string | null;
   completedAtLabel: string | null;
   isCompleted: boolean;
 };
@@ -49,6 +51,7 @@ export function SessionHeader({
   name,
   notes,
   startedAtLabel,
+  scheduledForLabel,
   completedAtLabel,
   isCompleted,
 }: SessionHeaderProps) {
@@ -61,7 +64,11 @@ export function SessionHeader({
               {name}
             </h1>
             <CardDescription>
-              <span>Started {startedAtLabel}</span>
+              {scheduledForLabel === null ? (
+                <span>Started {startedAtLabel}</span>
+              ) : (
+                <span>Scheduled for {scheduledForLabel}</span>
+              )}
               {completedAtLabel === null ? null : (
                 <span> · Finished {completedAtLabel}</span>
               )}

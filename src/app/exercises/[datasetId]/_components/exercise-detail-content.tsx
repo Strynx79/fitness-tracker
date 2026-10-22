@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink, Play } from "lucide-react";
 
+import { ScheduleExerciseButton } from "@/app/exercises/[datasetId]/_components/schedule-exercise-button";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { capitalizeExerciseName, extractYouTubeId } from "@/lib/exercise";
 import { getExercise } from "@/lib/exercises";
 import { getCurrentUser } from "@/lib/auth";
+import { todayIso, addDays } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { getInProgressSession } from "@/lib/workouts";
 
@@ -36,13 +38,15 @@ export async function ExerciseDetailContent({
 }: ExerciseDetailContentProps) {
   const { datasetId } = await params;
   const user = await getCurrentUser();
+  const today = todayIso(user.timezone);
+  const tomorrow = addDays(today, 1);
 
   // Both reads are request-shaped and belong inside this boundary. The open
   // session decides whether the CTA can send the pick straight back to a workout
   // or has to start at the workouts page.
   const [exercise, inProgress] = await Promise.all([
     getExercise(datasetId),
-    getInProgressSession(user.id),
+    getInProgressSession(user.id, today),
   ]);
 
   // Missing and malformed are the same answer, so an id cannot be probed.
@@ -191,6 +195,12 @@ export async function ExerciseDetailContent({
           </p>
         </div>
       )}
+
+      <ScheduleExerciseButton
+        datasetId={exercise.datasetId}
+        today={today}
+        defaultDate={tomorrow}
+      />
 
       <Separator />
 

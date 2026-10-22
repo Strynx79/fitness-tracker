@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isIsoDate } from "@/lib/date";
 import {
   emptyToNull,
   integerField,
@@ -57,45 +58,26 @@ export const createSessionSchema = z.object({
 /**
  * One logged set.
  *
+ * The exercise is identified by its BLOCK (`workoutExerciseId`), not by a name:
+ * the block already holds the display name and catalog link, so the set cannot
+ * disagree with the card it appears under.
+ *
  * `weightKg` is `DECIMAL(5,2)` and deliberately accepts `0`: a bodyweight set
  * (pull-up, dip) is a real top set, and rejecting 0 would make the progressive
  * overload callout treat bodyweight work as "no data". A negative weight is
- * never meaningful here (unlike, say, an assisted machine, which the schema
- * cannot express) and is rejected.
+ * never meaningful here and is rejected.
  *
  * `rpe` is `DECIMAL(3,1)` in 0.5 steps. The 0.5-step rule is enforced on the
  * number, not the string, because "10.0" and "10" are the same rating.
  */
 export const logSetSchema = z.object({
-  // Format bounds only. The action's ownership + "not finished" queries are
-  // what decide whether this id means anything.
-  sessionId: z
-    .string("Session not found.")
+  // Format bounds only. The action's ownership + "not finished" queries decide
+  // whether this id means anything.
+  workoutExerciseId: z
+    .string("Exercise not found. Reload the page.")
     .trim()
-    .min(1, "Session not found.")
-    .max(40, "Session not found."),
-
-  // 120 matches `WorkoutSet.exerciseName`'s `@db.VarChar(120)`.
-  exerciseName: z
-    .string("Name the exercise.")
-    .trim()
-    .min(1, "Name the exercise.")
-    .max(120, "Exercise names must be 120 characters or fewer."),
-
-  // The catalog row this set came from, when the user picked one from the
-  // library. Blank/absent means free-typed, which stays fully supported. Like
-  // `sessionId`, this is a format bound only: whether the row exists is decided
-  // in the action, and the catalog name — not the posted one — becomes the
-  // stored display name, so a hidden id can never disagree with the text.
-  exerciseId: z.preprocess(
-    emptyToNull,
-    z
-      .string("That exercise is no longer in the library.")
-      .trim()
-      .max(40, "That exercise is no longer in the library.")
-      .nullable()
-      .optional(),
-  ),
+    .min(1, "Exercise not found. Reload the page.")
+    .max(40, "Exercise not found. Reload the page."),
 
   weightKg: requiredDecimalField({
     label: "Weight",
@@ -137,6 +119,75 @@ export const deleteSetSchema = z.object({
     .max(40, "Set not found."),
 });
 
+/** Id-only envelope for deleting an exercise block; same shape as a set id. */
+export const deleteExerciseBlockSchema = z.object({
+  id: z
+    .string("Exercise not found.")
+    .trim()
+    .min(1, "Exercise not found.")
+    .max(40, "Exercise not found."),
+});
+
+/**
+ * Add an exercise card to a session.
+ *
+ * Exactly one of `exerciseId` (picked from the catalog) or `name` (typed by the
+ * user) has to be present — that is what makes "blank exercise pages" and
+ * "search and pick" the same action with two entry points.
+ */
+export const addExerciseBlockSchema = z
+  .object({
+    sessionId: z
+      .string("Session not found.")
+      .trim()
+      .min(1, "Session not found.")
+      .max(40, "Session not found."),
+
+    datasetId: z.preprocess(
+      emptyToNull,
+      z
+        .string("That exercise is no longer in the library.")
+        .trim()
+        .regex(/^\d{4}$/, "That exercise is no longer in the library.")
+        .nullable()
+        .optional(),
+    ),
+
+    // 120 matches `WorkoutExercise.name`'s `@db.VarChar(120)`.
+    name: z.preprocess(
+      emptyToNull,
+      z
+        .string("Name the exercise.")
+        .trim()
+        .max(120, "Exercise names must be 120 characters or fewer.")
+        .nullable()
+        .optional(),
+    ),
+  })
+  .refine((value) => value.datasetId != null || value.name != null, {
+    message: "Pick an exercise or name one.",
+    path: ["name"],
+  });
+
+/**
+ * Schedule an exercise into a workout on a future date.
+ *
+ * The date is a calendar date (`YYYY-MM-DD`), not an instant: "Saturday's push
+ * day" is a day, and storing an instant would make it shift with the user's
+ * timezone. `isIsoDate` rejects "2026-02-31" as well as the wrong shape.
+ */
+export const scheduleExerciseSchema = z.object({
+  datasetId: z
+    .string("Exercise not found.")
+    .trim()
+    .regex(/^\d{4}$/, "Exercise not found."),
+
+  date: z
+    .string("Pick a date.")
+    .refine((value) => isIsoDate(value), "Pick a valid date."),
+});
+
+/** Id-only envelope for closing a session. */
 export const finishSessionSchema = z.object({
   sessionId: z
     .string("Session not found.")
@@ -172,12 +223,11 @@ export type WorkoutFieldErrors = Partial<
   Record<
     | "name" // createSession
     | "notes" // createSession
-    | "exerciseName" // logSet
-    | "exerciseId" // logSet — hidden field; surfaces below the exercise input
+    | "workoutExerciseId" // logSet — hidden field, anchored on the block
     | "weightKg" // logSet
     | "reps" // logSet
     | "rpe" // logSet
-    | "sessionId", // logSet — hidden field, for action-level failures
+    | "sessionId", // logSet/block actions — action-level failures
     string[]
   >
 >;

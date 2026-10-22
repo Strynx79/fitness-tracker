@@ -104,51 +104,87 @@ model HabitLog {
 // Slice 3 — Workout & progressive overload
 // ---------------------------------------------------------------------------
 model WorkoutSession {
-  id          String    @id @default(cuid())
-  userId      String    @map("user_id")
-  name        String    @db.VarChar(80) // "Push" | "Pull" | "Legs" | free text
-  notes       String?   @db.Text
-  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
-  completedAt DateTime? @map("completed_at") @db.Timestamptz(3) // NULL = in progress
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  name         String    @db.VarChar(80) // "Push" | "Pull" | "Legs" | free text
+  notes        String?   @db.Text
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  // Set for a workout planned ahead of time. NULL = not scheduled (the normal
+  // "start now" case). A session dated in the future is NOT the active one —
+  // every "in progress" query has to exclude it.
+  scheduledFor DateTime? @map("scheduled_for") @db.Date
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(3) // NULL = in progress
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sets WorkoutSet[]
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sets      WorkoutSet[]
+  exercises WorkoutExercise[]
 
   @@index([userId, startedAt]) // session history list
   @@index([userId, completedAt]) // Slice 4 "last completed workout"
+  @@index([userId, scheduledFor]) // "upcoming workouts" list
   @@map("workout_sessions")
 }
 
-// exerciseName stays the display string and exerciseKey the canonical lookup
-// key (trimmed, lowercased), so "Bench Press" and "bench press" resolve to the
-// same exercise even for a set that is not linked to the catalog yet.
+// One exercise inside a session — the card the logging screen is built around.
+// It exists BEFORE any set is logged, which is what makes "add a blank exercise
+// and fill it in as you go" possible; a set-derived list cannot represent an
+// empty card. `exerciseId` links to the catalog when the user picked one, and is
+// NULL for a custom name (or if the catalog row is ever removed).
+model WorkoutExercise {
+  id         String   @id @default(cuid())
+  sessionId  String   @map("session_id")
+  exerciseId String?  @map("exercise_id")
+  name       String   @db.VarChar(120)
+  nameKey    String   @map("name_key") @db.VarChar(120)
+  // Display order within the session; new blocks append at max + 1.
+  position   Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise?      @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
+  sets     WorkoutSet[]
+
+  // One block per exercise per session: "Bench Press" and "bench press" are the
+  // same exercise, matching the key the overload history is built on.
+  @@unique([sessionId, nameKey])
+  @@index([sessionId, position])
+  @@map("workout_exercises")
+}
+
+// A logged set. `workoutExerciseId` is the block it belongs to; the denormalised
+// `exerciseName`/`exerciseKey` stay because the progressive-overload query reads
+// them across sessions without joining every block.
 //
 // exerciseId is OPTIONAL on purpose: the catalog is global and read-only, while
 // sets are user-authored. A set logged from the library points at a catalog row;
 // a hand-typed custom exercise keeps it NULL, and deleting/rebuilding the
 // catalog must never cascade into someone's training history (hence SetNull).
 model WorkoutSet {
-  id           String   @id @default(cuid())
-  sessionId    String   @map("session_id")
-  exerciseId   String?  @map("exercise_id")
-  exerciseName String   @map("exercise_name") @db.VarChar(120)
-  exerciseKey  String   @map("exercise_key") @db.VarChar(120)
-  setNumber    Int      @map("set_number") // 1-based, per (session, exercise)
-  weightKg     Decimal  @default(0) @map("weight_kg") @db.Decimal(5, 2) // 0 = bodyweight
-  reps         Int
-  rpe          Decimal? @db.Decimal(3, 1) // 1.0–10.0 in 0.5 steps; NULL = unrated
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                String   @id @default(cuid())
+  sessionId         String   @map("session_id")
+  workoutExerciseId String   @map("workout_exercise_id")
+  exerciseId        String?  @map("exercise_id")
+  exerciseName      String   @map("exercise_name") @db.VarChar(120)
+  exerciseKey       String   @map("exercise_key") @db.VarChar(120)
+  setNumber         Int      @map("set_number") // 1-based, per block
+  weightKg          Decimal  @default(0) @map("weight_kg") @db.Decimal(5, 2) // 0 = bodyweight
+  reps              Int
+  rpe               Decimal? @db.Decimal(3, 1) // 1.0–10.0 in 0.5 steps; NULL = unrated
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  exercise Exercise?      @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
+  session         WorkoutSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workoutExercise WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  exercise        Exercise?       @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
 
   // Idempotent "log a set" (safe on double-submit) + session detail reads.
   @@unique([sessionId, exerciseKey, setNumber])
   @@index([exerciseKey]) // per-exercise history / "previous top set"
   @@index([exerciseId]) // catalog → "my history with this exercise"
+  @@index([workoutExerciseId]) // a block's table
   @@map("workout_sets")
 }
 
@@ -185,6 +221,7 @@ model Exercise {
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   sets WorkoutSet[]
+  workoutExercises WorkoutExercise[]
 
   // Prefix search on the normalized key (the library's `q`) and the three facet
   // filters. Each is a cheap b-tree scan over 1.3k rows.

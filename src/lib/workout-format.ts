@@ -55,3 +55,19 @@ export function formatInstant(iso: string, timeZone: string): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * "Sat, Oct 24" for a calendar date (`YYYY-MM-DD`).
+ *
+ * Formatted in UTC on purpose: a `DATE` column has no time, so applying the
+ * user's zone would shift "Saturday" to Friday for anyone west of Greenwich.
+ * `parseIsoDate` already anchors the value at UTC midnight.
+ */
+export function formatCalendarDate(isoDate: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00.000Z`));
+}

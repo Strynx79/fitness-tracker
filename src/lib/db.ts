@@ -14,7 +14,21 @@ if (!connectionString) {
 
 function createPrismaClient(): PrismaClient {
   // Prisma 7 requires a driver adapter; it uses the `pg` connection pool.
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  //
+  // The timeouts and keepalive are for a REMOTE Postgres (Neon): its free tier
+  // suspends idle computes, so the first query after a pause takes a couple of
+  // seconds, and an idle socket can be reaped between requests. With the pg
+  // defaults that surfaces as a bare `ETIMEDOUT` on whichever query came next.
+  // Against a local container these values are simply never reached.
+  return new PrismaClient({
+    adapter: new PrismaPg({
+      connectionString,
+      keepAlive: true,
+      connectionTimeoutMillis: 30_000,
+      idleTimeoutMillis: 30_000,
+      max: 10,
+    }),
+  });
 }
 
 // Next.js re-evaluates modules on every HMR pass in dev. Without caching the

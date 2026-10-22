@@ -3,9 +3,11 @@ import { Suspense } from "react";
 
 import { NewSessionForm } from "@/app/workouts/_components/new-session-form";
 import { SessionList } from "@/app/workouts/_components/session-list";
+import { UpcomingList } from "@/app/workouts/_components/upcoming-list";
 import { WorkoutsSkeleton } from "@/app/workouts/_components/workouts-skeleton";
 import { getCurrentUser } from "@/lib/auth";
-import { getWorkoutSessionList } from "@/lib/workouts";
+import { todayIso } from "@/lib/date";
+import { getUpcomingWorkouts, getWorkoutSessionList } from "@/lib/workouts";
 
 export const metadata: Metadata = {
   title: "Workouts",
@@ -39,10 +41,16 @@ export default function WorkoutsPage() {
 
 async function WorkoutsContent() {
   const user = await getCurrentUser();
-  const sessions = await getWorkoutSessionList(user.id);
+  const today = todayIso(user.timezone);
+
+  const [sessions, upcoming] = await Promise.all([
+    getWorkoutSessionList(user.id, today),
+    getUpcomingWorkouts(user.id, today),
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
+      <UpcomingList workouts={upcoming} />
       <NewSessionForm />
       <SessionList sessions={sessions} timezone={user.timezone} />
     </div>

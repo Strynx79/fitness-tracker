@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { parseIsoDate, toIsoDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { pickTopSet } from "@/lib/exercise";
 
@@ -30,10 +31,12 @@ export type WorkoutSessionSummary = {
   name: string;
   /** ISO 8601 instant — NOT a calendar date; this column is `timestamptz`. */
   startedAtIso: string;
+  /** Calendar date (YYYY-MM-DD) when the workout is planned; `null` if not. */
+  scheduledForIso: string | null;
   /** `null` means the session is still in progress. */
   completedAtIso: string | null;
   setCount: number;
-  /** Distinct exercise names, in order of first appearance in the session. */
+  /** Distinct exercise names, in order of the session's blocks. */
   exerciseNames: string[];
 };
 
@@ -66,10 +69,24 @@ export type LastWorkoutSummary = {
   exerciseNames: string[];
 };
 
-export type WorkoutExerciseGroup = {
+/**
+ * One exercise block inside a session — the card the logging screen renders.
+ *
+ * A block exists even with zero sets, which is the whole point of the table: you
+ * add "Bench press", then fill the sets in as the workout happens.
+ */
+export type WorkoutExerciseBlock = {
+  /** `WorkoutExercise.id` — what the add-set form posts. */
+  id: string;
   exerciseKey: string;
-  /** Display name as first typed in THIS session (may differ in case). */
+  /** Display name as first typed/picked in THIS session (may differ in case). */
   exerciseName: string;
+  /** Internal catalog id when picked from the library, else `null`. */
+  exerciseId: string | null;
+  /** Dataset id (e.g. "0025") for linking to `/exercises/[datasetId]`. */
+  datasetId: string | null;
+  /** Display order within the session. */
+  position: number;
   /** Ordered by `setNumber` ascending. */
   sets: WorkoutSetDto[];
   previousTopSet: PreviousTopSet | null;
@@ -80,9 +97,11 @@ export type WorkoutSessionDetail = {
   name: string;
   notes: string | null;
   startedAtIso: string;
+  /** Calendar date (YYYY-MM-DD) when planned; `null` if not scheduled. */
+  scheduledForIso: string | null;
   completedAtIso: string | null;
   isCompleted: boolean;
-  groups: WorkoutExerciseGroup[];
+  blocks: WorkoutExerciseBlock[];
 };
 
 /** The only place a Prisma `Decimal` is converted to a `number`. */
@@ -149,10 +168,9 @@ export async function getWorkoutSession(
   userId: string,
   sessionId: string,
 ): Promise<WorkoutSessionDetail | null> {
-  // Query 1 — the session and its sets. `createdAt` first so the grouping below
-  // sees exercises in the order they were first logged (and so the display name
-  // is the first one typed); `setNumber` breaks ties and keeps the ordering
-  // stable when a fixture inserts everything in one millisecond.
+  // Query 1 — the session, its exercise blocks, and each block's sets. Ordering
+  // is `position` (the order the user added them) and then `createdAt` as a
+  // stable tie-break for blocks that share a position after an import.
   const session = await prisma.workoutSession.findFirst({
     where: { id: sessionId, userId },
     select: {
@@ -160,18 +178,30 @@ export async function getWorkoutSession(
       name: true,
       notes: true,
       startedAt: true,
+      scheduledFor: true,
       completedAt: true,
-      sets: {
+      exercises: {
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         select: {
           id: true,
-          exerciseName: true,
-          exerciseKey: true,
-          setNumber: true,
-          weightKg: true,
-          reps: true,
-          rpe: true,
+          name: true,
+          nameKey: true,
+          position: true,
+          exerciseId: true,
+          exercise: { select: { datasetId: true } },
+          sets: {
+            select: {
+              id: true,
+              exerciseName: true,
+              exerciseKey: true,
+              setNumber: true,
+              weightKg: true,
+              reps: true,
+              rpe: true,
+            },
+            orderBy: [{ setNumber: "asc" }],
+          },
         },
-        orderBy: [{ createdAt: "asc" }, { setNumber: "asc" }],
       },
     },
   });
@@ -179,70 +209,35 @@ export async function getWorkoutSession(
   // Not found and not owned are the same answer, on purpose.
   if (session === null) return null;
 
-  // Grouped in insertion order. `Map` preserves it, so the UI sees exercises in
-  // the order the user trained them.
-  const groups = new Map<string, WorkoutExerciseGroup>();
-  for (const set of session.sets) {
-    const dto = toSetDto(set);
-    const existing = groups.get(dto.exerciseKey);
+  // Blocks are returned in position order, sets in setNumber order. An empty
+  // block (zero sets) is a real, renderable card — that is what "add an exercise
+  // and fill it in as you go" means.
+  const blocks: WorkoutExerciseBlock[] = session.exercises.map((block) => ({
+    id: block.id,
+    exerciseKey: block.nameKey,
+    exerciseName: block.name,
+    exerciseId: block.exerciseId,
+    datasetId: block.exercise?.datasetId ?? null,
+    position: block.position,
+    sets: block.sets.map(toSetDto),
+    previousTopSet: null,
+  }));
 
-    if (existing === undefined) {
-      groups.set(dto.exerciseKey, {
-        exerciseKey: dto.exerciseKey,
-        exerciseName: dto.exerciseName,
-        sets: [dto],
-        previousTopSet: null,
-      });
-      continue;
-    }
-
-    existing.sets.push(dto);
-  }
-
-  // Sorted explicitly rather than relying on the query order: the contract is
-  // "setNumber ascending", and a group's first-typed (`createdAt`) order can
-  // differ from it once a set is deleted and re-logged.
-  for (const group of groups.values()) {
-    group.sets.sort((a, b) => a.setNumber - b.setNumber);
-  }
-
-  const exerciseKeys = Array.from(groups.keys());
+  const exerciseKeys = blocks.map((block) => block.exerciseKey);
 
   if (exerciseKeys.length > 0) {
     // Query 2 — every set these exercises appear in, across the user's other
     // COMPLETED sessions in the window, newest session first.
     //
-    // This is the one query that makes the callout possible without an N+1
-    // ("for each exercise, fetch its history"): one `IN (...)` is bounded by the
-    // number of distinct exercises on this screen, and the newest-first order
-    // means the first session encountered per key is already the right one.
+    // One `IN (...)` instead of an N+1 ("for each exercise, fetch its history");
+    // the newest-first order means the first session encountered per key is
+    // already the right one.
     //
     // Deliberately excluded:
     //   - in-progress sessions (`completedAt: null`) — their sets are not
     //     history, and an abandoned session must never become a target
     //   - this session itself, so re-rendering after logging a set still shows
     //     the PREVIOUS session rather than the set just typed
-    //
-    // Upgrade path (not implemented): a PostgreSQL `DISTINCT ON (exercise_key)`
-    // raw query pushes the per-exercise ranking into the database —
-    //
-    //   SELECT DISTINCT ON (ws.exercise_key)
-    //          ws.exercise_key, ws.weight_kg, ws.reps, ws.rpe, ws.set_number,
-    //          s.name, s.started_at
-    //     FROM workout_sets ws
-    //     JOIN workout_sessions s ON s.id = ws.session_id
-    //    WHERE s.user_id = $1
-    //      AND s.completed_at IS NOT NULL
-    //      AND s.started_at >= now() - interval '12 months'
-    //      AND s.id <> $2
-    //      AND ws.exercise_key = ANY($3)
-    //    ORDER BY ws.exercise_key, s.started_at DESC, ws.weight_kg DESC,
-    //             ws.reps DESC, ws.set_number ASC;
-    //
-    // That is worth doing when the history is large enough for the JS reduce to
-    // matter; it costs a hand-written row type and `$queryRaw`, which is why it
-    // stays a note for now. Fewer queries is not the goal here — the current
-    // shape is already two round trips.
     const windowStart = new Date(Date.now() - PREVIOUS_TOP_SET_WINDOW_DAYS * MS_PER_DAY);
 
     const candidates = await prisma.workoutSet.findMany({
@@ -268,14 +263,6 @@ export async function getWorkoutSession(
       orderBy: [{ session: { startedAt: "desc" } }, { setNumber: "asc" }],
     });
 
-    /**
-     * The scan is newest-session-first, so the first session seen per exercise is
-     * the one whose top set becomes the target. Rows are grouped per exercise and
-     * winning session here; `pickTopSet` (pure, unit-tested) does the ranking.
-     *
-     * RankedSet carries the session metadata alongside the three ranking fields,
-     * so the winning row alone can be turned into a `PreviousTopSet`.
-     */
     type RankedSet = {
       weightKg: number;
       reps: number;
@@ -318,8 +305,7 @@ export async function getWorkoutSession(
       // A different session — older, or the same instant but a different row —
       // can never contribute to the newest session's top set. Sessions are
       // identified by `id`, never `startedAt`: two distinct sessions can share a
-      // timestamp (batch imports, tests, a clock with millisecond resolution), and
-      // mixing them would attribute the wrong name/date to the target.
+      // timestamp, and mixing them would attribute the wrong name/date.
       if (row.session.id !== current.sessionId) continue;
 
       current.sets.push(rankedSet);
@@ -343,8 +329,8 @@ export async function getWorkoutSession(
       });
     }
 
-    for (const group of groups.values()) {
-      group.previousTopSet = bestByKey.get(group.exerciseKey) ?? null;
+    for (const block of blocks) {
+      block.previousTopSet = bestByKey.get(block.exerciseKey) ?? null;
     }
   }
 
@@ -353,83 +339,135 @@ export async function getWorkoutSession(
     name: session.name,
     notes: session.notes,
     startedAtIso: session.startedAt.toISOString(),
+    // `DATE` columns come back as UTC midnight, which is what `toIsoDate` reads.
+    scheduledForIso:
+      session.scheduledFor === null ? null : toIsoDate(session.scheduledFor),
     completedAtIso: session.completedAt === null ? null : session.completedAt.toISOString(),
     isCompleted: session.completedAt !== null,
-    groups: Array.from(groups.values()),
+    blocks,
   };
 }
 
-/**
- * The history list, newest first, in-progress sessions included.
- *
- * One query: the per-session `sets` include is bounded by the sessions actually
- * returned, so it is not an N+1 — a per-session `count` or `findMany` in a loop
- * would be. `setCount` comes from the same rows, so no second aggregate is
- * needed; only the two exercise columns are selected to keep the payload small.
- *
- * Exercises are deduped on `exerciseKey`, matching the detail page's grouping:
- * a session containing "Bench Press" and "bench press" is one exercise, and the
- * summary keeps the first display name typed for that key.
- */
 export async function getWorkoutSessionList(
   userId: string,
+  today: string,
 ): Promise<WorkoutSessionSummary[]> {
   const sessions = await prisma.workoutSession.findMany({
-    where: { userId },
+    where: {
+      userId,
+      // Planned workouts live in the "Upcoming" list, not in history. Without
+      // this a session scheduled for Saturday would sit at the top of "History"
+      // looking like something that already happened.
+      NOT: { scheduledFor: { gt: parseIsoDate(today) } },
+    },
     orderBy: { startedAt: "desc" },
     select: {
       id: true,
       name: true,
       startedAt: true,
+      scheduledFor: true,
       completedAt: true,
-      sets: {
-        select: { exerciseName: true, exerciseKey: true },
-        // First appearance order, so the summary names exercises the way the
-        // session opened rather than alphabetically.
-        orderBy: [{ createdAt: "asc" }, { setNumber: "asc" }],
+      // Blocks carry the exercise names (including ones with no sets yet), and
+      // their position is the order the session was built in.
+      exercises: {
+        select: { name: true },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      },
+      _count: { select: { sets: true } },
+    },
+  });
+
+  return sessions.map((session) => ({
+    id: session.id,
+    name: session.name,
+    startedAtIso: session.startedAt.toISOString(),
+    scheduledForIso:
+      session.scheduledFor === null ? null : toIsoDate(session.scheduledFor),
+    completedAtIso:
+      session.completedAt === null ? null : session.completedAt.toISOString(),
+    setCount: session._count.sets,
+    exerciseNames: session.exercises.map((exercise) => exercise.name),
+  }));
+}
+
+/**
+ * The newest session that is actually under way.
+ *
+ * "Under way" excludes anything scheduled for a future date: a workout planned
+ * for Saturday must not be treated as the session you are logging into today,
+ * or the library's "Log in …" button would target the wrong workout.
+ *
+ * Nothing forbids several open sessions, so "newest by startedAt" is the one a
+ * user who just tapped "start a workout" means; `id` breaks exact ties
+ * deterministically, the same way `getLastCompletedWorkout` does.
+ */
+export async function getInProgressSession(
+  userId: string,
+  today: string,
+): Promise<{ id: string; name: string } | null> {
+  return prisma.workoutSession.findFirst({
+    where: {
+      userId,
+      completedAt: null,
+      // A scheduled date in the future is not "in progress" yet.
+      OR: [{ scheduledFor: null }, { scheduledFor: { lte: parseIsoDate(today) } }],
+    },
+    orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+    select: { id: true, name: true },
+  });
+}
+
+/** One planned workout, for the "Upcoming" list on the workouts page. */
+export type UpcomingWorkoutSummary = {
+  id: string;
+  name: string;
+  /** Calendar date (YYYY-MM-DD); always present for an upcoming workout. */
+  scheduledForIso: string;
+  /** Exercise blocks already added, in order. */
+  exerciseNames: string[];
+};
+
+/**
+ * Planned workouts dated after `today`, soonest first.
+ *
+ * Only blocks matter here — a scheduled workout normally has no sets yet, so
+ * this deliberately does not read `workout_sets` at all.
+ */
+export async function getUpcomingWorkouts(
+  userId: string,
+  today: string,
+): Promise<UpcomingWorkoutSummary[]> {
+  const rows = await prisma.workoutSession.findMany({
+    where: {
+      userId,
+      completedAt: null,
+      scheduledFor: { gt: parseIsoDate(today) },
+    },
+    orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      scheduledFor: true,
+      exercises: {
+        select: { name: true },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
       },
     },
   });
 
-  return sessions.map((session) => {
-    const seenKeys = new Set<string>();
-    const exerciseNames: string[] = [];
-
-    for (const set of session.sets) {
-      if (seenKeys.has(set.exerciseKey)) continue;
-      seenKeys.add(set.exerciseKey);
-      exerciseNames.push(set.exerciseName);
-    }
-
-    return {
-      id: session.id,
-      name: session.name,
-      startedAtIso: session.startedAt.toISOString(),
-      completedAtIso:
-        session.completedAt === null ? null : session.completedAt.toISOString(),
-      setCount: session.sets.length,
-      exerciseNames,
-    };
-  });
-}
-
-/**
- * The newest session that is still open, if any.
- *
- * The library uses this to send a picked exercise straight back to the workout
- * the user is actually doing. Nothing forbids several open sessions (starting a
- * second one is allowed), so "newest by startedAt" is the one a user who just
- * tapped "start a workout" means; `id` breaks exact ties deterministically, the
- * same way `getLastCompletedWorkout` does.
- */
-export async function getInProgressSession(
-  userId: string,
-): Promise<{ id: string; name: string } | null> {
-  return prisma.workoutSession.findFirst({
-    where: { userId, completedAt: null },
-    orderBy: [{ startedAt: "desc" }, { id: "desc" }],
-    select: { id: true, name: true },
-  });
+  // The `gt` filter guarantees a date, but the column is nullable in the schema.
+  return rows.flatMap((row) =>
+    row.scheduledFor === null
+      ? []
+      : [
+          {
+            id: row.id,
+            name: row.name,
+            scheduledForIso: toIsoDate(row.scheduledFor),
+            exerciseNames: row.exercises.map((exercise) => exercise.name),
+          },
+        ],
+  );
 }
 
 /**

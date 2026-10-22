@@ -15,8 +15,7 @@ import { logSetSchema } from "@/lib/validations/workout";
 
 /** The minimum valid log-set payload; each test overrides one field. */
 const validLogSet = {
-  sessionId: "session-1",
-  exerciseName: "Bench Press",
+  workoutExerciseId: "we_1",
   weightKg: "80",
   reps: "5",
 };
@@ -210,23 +209,15 @@ test("isValidTimeZone accepts canonical names and links, rejects garbage", () =>
   assert.equal(isValidTimeZone(""), false);
 });
 
-test("logSetSchema treats a blank catalog id as free-typed, and keeps a real one", () => {
-  // An empty hidden input is "no link"; an absent key stays undefined (the
-  // action collapses both with `?? null`).
-  assert.equal(logSetSchema.parse({ ...validLogSet, exerciseId: "" }).exerciseId, null);
-  assert.equal(logSetSchema.parse(validLogSet).exerciseId, undefined);
-
+test("logSetSchema requires the exercise block, not a name", () => {
   assert.equal(
-    logSetSchema.parse({ ...validLogSet, exerciseId: " clx0abc " }).exerciseId,
-    "clx0abc",
+    issueMessage(logSetSchema.safeParse({ weightKg: "80", reps: "5" }), "workoutExerciseId"),
+    "Exercise not found. Reload the page.",
   );
-
-  // 41 chars exceeds the cuid bound: rejected on the field, not silently cut.
   assert.equal(
-    issueMessage(
-      logSetSchema.safeParse({ ...validLogSet, exerciseId: "a".repeat(41) }),
-      "exerciseId",
-    ),
-    "That exercise is no longer in the library.",
+    logSetSchema.parse({ ...validLogSet, workoutExerciseId: "we_1" }).workoutExerciseId,
+    "we_1",
   );
 });
+
+

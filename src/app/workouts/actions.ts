@@ -6,14 +6,19 @@ import { z } from "zod";
 
 import { Prisma } from "@/generated/prisma/client";
 import { getCurrentUser } from "@/lib/auth";
+import { parseIsoDate, todayIso } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { capitalizeExerciseName, deriveExerciseKey } from "@/lib/exercise";
+import { searchExercises, type ExerciseSummary } from "@/lib/exercises";
 import {
+  addExerciseBlockSchema,
   createSessionSchema,
+  deleteExerciseBlockSchema,
   deleteSetSchema,
   discardSessionSchema,
   finishSessionSchema,
   logSetSchema,
+  scheduleExerciseSchema,
   type WorkoutFieldErrors,
 } from "@/lib/validations/workout";
 
@@ -26,8 +31,6 @@ export type WorkoutActionState = {
   values?: {
     name: string;
     notes: string;
-    exerciseName: string;
-    exerciseId: string;
     weightKg: string;
     reps: string;
     rpe: string;
@@ -55,21 +58,11 @@ function readField(formData: FormData, key: string): string {
 function blankValues(): {
   name: string;
   notes: string;
-  exerciseName: string;
-  exerciseId: string;
   weightKg: string;
   reps: string;
   rpe: string;
 } {
-  return {
-    name: "",
-    notes: "",
-    exerciseName: "",
-    exerciseId: "",
-    weightKg: "",
-    reps: "",
-    rpe: "",
-  };
+  return { name: "", notes: "", weightKg: "", reps: "", rpe: "" };
 }
 
 /**
@@ -177,26 +170,35 @@ export async function createSession(
  *   4. the unique violation that two concurrent submits can cause is reported as
  *      a retry, not as a crash
  */
+/**
+ * Log one set into an exercise block.
+ *
+ * The block is resolved first (scoped by the user) because the form posts a
+ * block id, not a session id or an exercise name. Then the session row is locked
+ * exactly as before: that UPDATE takes a row-level lock Postgres holds until
+ * commit, so a concurrent finish or discard either wins outright or waits and
+ * then fails its `completedAt: null` predicate — a set can never land in a
+ * session that just became history.
+ *
+ * `setNumber` is computed per block from the database, never taken from the
+ * client: it is backed by `@@unique([sessionId, exerciseKey, setNumber])`, and
+ * the lock makes the count sequential.
+ */
 export async function logSet(
   prevState: WorkoutActionState,
   formData: FormData,
 ): Promise<WorkoutActionState> {
   const user = await getCurrentUser();
 
-  const sessionId = readField(formData, "sessionId");
   const values = {
     ...blankValues(),
-    exerciseName: readField(formData, "exerciseName"),
-    exerciseId: readField(formData, "exerciseId"),
     weightKg: readField(formData, "weightKg"),
     reps: readField(formData, "reps"),
     rpe: readField(formData, "rpe"),
   };
 
   const parsed = logSetSchema.safeParse({
-    sessionId,
-    exerciseName: values.exerciseName,
-    exerciseId: values.exerciseId,
+    workoutExerciseId: readField(formData, "workoutExerciseId"),
     weightKg: values.weightKg,
     reps: values.reps,
     rpe: values.rpe,
@@ -204,9 +206,7 @@ export async function logSet(
 
   if (!parsed.success) {
     // Every schema in `@/lib/validations/workout` carries explicit user-facing
-    // copy, so the per-field map is safe to show verbatim. `message` stays a
-    // short banner; the detail lives on the field that failed, which is what
-    // makes "80.555" point at the weight input instead of a generic toast.
+    // copy, so the per-field map is safe to show verbatim.
     return {
       status: "error",
       message: "Please fix the highlighted fields.",
@@ -215,103 +215,77 @@ export async function logSet(
     };
   }
 
+  let sessionId: string | null = null;
+
   try {
     const outcome = await prisma.$transaction(async (tx) => {
-      // Take the session's row lock FIRST. The `completedAt: null` predicate is
-      // what makes this a serialization point: a second mutation blocks here
-      // until the first commits, then re-evaluates the predicate against the
-      // committed row (READ COMMITTED). If the session was finished or deleted
-      // meanwhile, this matches 0 rows and the insert below never happens.
+      // Ownership is part of the predicate: a block id belonging to another user
+      // is indistinguishable from one that does not exist.
+      const block = await tx.workoutExercise.findFirst({
+        where: {
+          id: parsed.data.workoutExerciseId,
+          session: { userId: user.id },
+        },
+        select: {
+          id: true,
+          sessionId: true,
+          name: true,
+          nameKey: true,
+          exerciseId: true,
+        },
+      });
+
+      if (block === null) {
+        return {
+          kind: "error" as const,
+          message: "Exercise not found. Reload the page.",
+          field: "workoutExerciseId" as const,
+        };
+      }
+
+      // The serialization point. See the module docs above.
       const locked = await tx.workoutSession.updateMany({
-        where: { id: parsed.data.sessionId, userId: user.id, completedAt: null },
+        where: { id: block.sessionId, userId: user.id, completedAt: null },
         data: { updatedAt: new Date() },
       });
 
       if (locked.count === 0) {
-        // Distinguish "gone/foreign" from "already finished" with a read that
-        // is still scoped by `userId`, so an id belonging to someone else keeps
-        // producing the same answer as one that does not exist.
         const existing = await tx.workoutSession.findFirst({
-          where: { id: parsed.data.sessionId, userId: user.id },
+          where: { id: block.sessionId, userId: user.id },
           select: { completedAt: true },
         });
 
         if (existing === null) {
-          const message = "Session not found.";
-          return { kind: "error" as const, message };
+          return { kind: "error" as const, message: "Session not found." };
         }
 
         // A finished session is history: its sets feed the "beat this" callout,
-        // so writing to it would rewrite the past. Reopening is a product
-        // decision for a later slice, not something this action allows by
-        // accident.
+        // so writing to it would rewrite the past.
         if (existing.completedAt !== null) {
-          const message = "This session is finished. Reopen is not supported yet.";
-          return { kind: "error" as const, message };
-        }
-
-        // Unreachable in practice: only a finish or a discard can make the
-        // guarded UPDATE miss while leaving an owned, in-progress row behind.
-        const message = GENERIC_FAILURE;
-        return { kind: "error" as const, message };
-      }
-
-      // Resolve the catalog row (when one was picked) INSIDE the transaction and
-      // after the lock, so the canonical display name cannot be swapped between
-      // the check and the insert.
-      //
-      // The name↔id invariant is enforced HERE, not only in the browser: the
-      // hidden input can survive a no-JS edit to the visible name, so a posted id
-      // is honoured only while the typed name still normalises to the same key
-      // as the catalog row. A mismatch means "the user edited it" → keep the
-      // typed name and store the set as free-typed, exactly as the form promises.
-      const typedKey = deriveExerciseKey(parsed.data.exerciseName);
-      let exerciseName = parsed.data.exerciseName;
-      let exerciseId: string | null = null;
-
-      const requestedExerciseId = parsed.data.exerciseId ?? null;
-
-      if (requestedExerciseId !== null) {
-        const catalogExercise = await tx.exercise.findUnique({
-          where: { id: requestedExerciseId },
-          select: { name: true, nameKey: true },
-        });
-
-        if (catalogExercise === null) {
           return {
             kind: "error" as const,
-            message: "That exercise is no longer in the library. Pick it again.",
-            field: "exerciseName" as const,
+            message: "This session is finished. Reopen is not supported yet.",
           };
         }
 
-        if (catalogExercise.nameKey === typedKey) {
-          exerciseName = capitalizeExerciseName(catalogExercise.name);
-          exerciseId = requestedExerciseId;
-        }
+        return { kind: "error" as const, message: GENERIC_FAILURE };
       }
 
-      const exerciseKey = deriveExerciseKey(exerciseName);
-
-      // Per-exercise numbering, matching `@@unique([sessionId, exerciseKey,
-      // setNumber])`. The lock above serializes writers, so this `_max` sees
-      // every committed set; the unique constraint stays as the backstop and
-      // the catch below still reports P2002 as a retry.
       const highest = await tx.workoutSet.aggregate({
-        where: { sessionId: parsed.data.sessionId, exerciseKey },
+        where: { workoutExerciseId: block.id },
         _max: { setNumber: true },
       });
       const setNumber = (highest._max.setNumber ?? 0) + 1;
 
       await tx.workoutSet.create({
         data: {
-          sessionId: parsed.data.sessionId,
-          // Display name as typed (or as the catalog spells it), canonical key as
-          // derived: both are stored so the UI can render the first and the
-          // history query can match the second.
-          exerciseName,
-          exerciseKey,
-          exerciseId,
+          sessionId: block.sessionId,
+          workoutExerciseId: block.id,
+          // Copied from the block, never from the form: the row's name and key
+          // always describe the card it is rendered under.
+          exerciseId: block.exerciseId,
+          exerciseName: block.name,
+          exerciseKey: block.nameKey,
           setNumber,
           // Already bounded to two decimals by the schema, so the number's
           // shortest round-trip representation is exactly what the user typed.
@@ -322,16 +296,16 @@ export async function logSet(
         select: { id: true },
       });
 
-      return { kind: "success" as const };
+      return { kind: "success" as const, sessionId: block.sessionId };
     });
 
     if (outcome.kind === "error") {
-      // A catalog failure belongs on the exercise field; every other failure here
-      // is about the session, and anchoring it there keeps the form from blaming
-      // a field the user never touched.
+      // A block failure belongs on the block; everything else is about the
+      // session, and anchoring it there keeps the form from blaming a field the
+      // user never touched.
       const anchor =
-        "field" in outcome && outcome.field === "exerciseName"
-          ? "exerciseName"
+        "field" in outcome && outcome.field === "workoutExerciseId"
+          ? "workoutExerciseId"
           : "sessionId";
       return {
         status: "error",
@@ -340,14 +314,19 @@ export async function logSet(
         values,
       };
     }
+
+    sessionId = outcome.sessionId;
   } catch (error) {
     if (isUniqueViolation(error)) {
       // Two submits computed the same `setNumber`. The other one won, so the set
-      // probably already exists — tell the user to look before retrying, rather
-      // than logging a duplicate under the next number. No visible field is
-      // wrong, so the anchor is `sessionId`.
+      // probably already exists — tell the user to look before retrying.
       const message = "That set was saved by another tap. Reload the page to see it.";
-      return { status: "error", message, fieldErrors: { sessionId: [message] }, values };
+      return {
+        status: "error",
+        message,
+        fieldErrors: { sessionId: [message] },
+        values,
+      };
     }
 
     console.error("Failed to log workout set:", error);
@@ -363,19 +342,311 @@ export async function logSet(
 }
 
 /**
- * Delete a set from an in-progress session.
+ * Add an exercise card to an open session.
  *
- * The session row is locked first (the same guarded `updateMany` as every other
- * mutation), so a concurrent `finishSession` either completes before this starts
- * — in which case the lock misses and the set is treated as not found — or waits
- * until this transaction commits. A set in a *finished* session can never be
- * deleted, which is what keeps a completed session from dropping to zero sets.
- *
- * Remaining sets are deliberately NOT renumbered. `setNumber` is a historical
- * label ("this was the third set"), gaps are harmless, and renumbering would
- * have to update rows one at a time — transiently colliding with
- * `@@unique([sessionId, exerciseKey, setNumber])` on every shift.
+ * Two entry points, one action: `exerciseId` for a catalog pick (the catalog
+ * name is authoritative), `name` for a blank/custom card. Adding an exercise
+ * that is already in the session is not an error — it focuses the existing card
+ * instead, which is what a double tap means.
  */
+export async function addExerciseBlock(input: {
+  sessionId: string;
+  datasetId?: string | null;
+  name?: string | null;
+}): Promise<WorkoutMutationResult & { blockId?: string }> {
+  const parsed = addExerciseBlockSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, message: firstValidationMessage(parsed.error) };
+  }
+
+  const user = await getCurrentUser();
+
+  try {
+    const outcome = await prisma.$transaction(async (tx) => {
+      // Same guarded lock as every other session mutation: a finished session
+      // must not gain a card.
+      const locked = await tx.workoutSession.updateMany({
+        where: { id: parsed.data.sessionId, userId: user.id, completedAt: null },
+        data: { updatedAt: new Date() },
+      });
+
+      if (locked.count === 0) {
+        const existing = await tx.workoutSession.findFirst({
+          where: { id: parsed.data.sessionId, userId: user.id },
+          select: { completedAt: true },
+        });
+
+        if (existing === null) {
+          return { kind: "error" as const, message: "Session not found." };
+        }
+
+        return {
+          kind: "error" as const,
+          message: "This session is finished.",
+        };
+      }
+
+      let name: string;
+      let exerciseId: string | null = null;
+
+      if (parsed.data.datasetId != null) {
+        const catalogExercise = await tx.exercise.findUnique({
+          where: { datasetId: parsed.data.datasetId },
+          select: { id: true, name: true },
+        });
+
+        if (catalogExercise === null) {
+          return {
+            kind: "error" as const,
+            message: "That exercise is no longer in the library.",
+          };
+        }
+
+        name = capitalizeExerciseName(catalogExercise.name);
+        exerciseId = catalogExercise.id;
+      } else {
+        // The refine on the schema guarantees a name when there is no id.
+        name = parsed.data.name ?? "";
+      }
+
+      const nameKey = deriveExerciseKey(name);
+
+      const existingBlock = await tx.workoutExercise.findFirst({
+        where: { sessionId: parsed.data.sessionId, nameKey },
+        select: { id: true },
+      });
+
+      if (existingBlock !== null) {
+        return {
+          kind: "success" as const,
+          blockId: existingBlock.id,
+          created: false,
+        };
+      }
+
+      const highest = await tx.workoutExercise.aggregate({
+        where: { sessionId: parsed.data.sessionId },
+        _max: { position: true },
+      });
+
+      const created = await tx.workoutExercise.create({
+        data: {
+          sessionId: parsed.data.sessionId,
+          exerciseId,
+          name,
+          nameKey,
+          position: (highest._max.position ?? -1) + 1,
+        },
+        select: { id: true },
+      });
+
+      return { kind: "success" as const, blockId: created.id, created: true };
+    });
+
+    if (outcome.kind === "error") {
+      return { ok: false, message: outcome.message };
+    }
+
+    revalidatePath(sessionPath(parsed.data.sessionId));
+    revalidatePath(WORKOUTS_PATH);
+
+    return { ok: true, blockId: outcome.blockId };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      // Lost a race against another tap that created the same block. The card
+      // exists, which is all the caller wanted.
+      return { ok: true };
+    }
+
+    console.error("Failed to add exercise block:", error);
+    return { ok: false, message: GENERIC_FAILURE };
+  }
+}
+
+/**
+ * Remove an exercise card and, by cascade, its sets.
+ *
+ * Only allowed while the session is open — the lock is taken first so a finish
+ * racing this delete either commits first (and this refuses) or waits.
+ */
+export async function deleteExerciseBlock(
+  blockId: string,
+): Promise<WorkoutMutationResult> {
+  const parsed = deleteExerciseBlockSchema.safeParse({ id: blockId });
+
+  if (!parsed.success) {
+    return { ok: false, message: firstValidationMessage(parsed.error) };
+  }
+
+  const user = await getCurrentUser();
+
+  try {
+    const outcome = await prisma.$transaction(async (tx) => {
+      const block = await tx.workoutExercise.findFirst({
+        where: {
+          id: parsed.data.id,
+          session: { userId: user.id, completedAt: null },
+        },
+        select: { id: true, sessionId: true },
+      });
+
+      if (block === null) {
+        return { kind: "error" as const, message: "Exercise not found." };
+      }
+
+      const locked = await tx.workoutSession.updateMany({
+        where: { id: block.sessionId, userId: user.id, completedAt: null },
+        data: { updatedAt: new Date() },
+      });
+
+      if (locked.count === 0) {
+        return { kind: "error" as const, message: "Exercise not found." };
+      }
+
+      // `onDelete: Cascade` on workout_sets.workoutExerciseId removes its sets.
+      await tx.workoutExercise.deleteMany({
+        where: { id: block.id, sessionId: block.sessionId },
+      });
+
+      return { kind: "success" as const, sessionId: block.sessionId };
+    });
+
+    if (outcome.kind === "error") {
+      return { ok: false, message: outcome.message };
+    }
+
+    revalidatePath(sessionPath(outcome.sessionId));
+    revalidatePath(WORKOUTS_PATH);
+  } catch (error) {
+    console.error("Failed to delete exercise block:", error);
+    return { ok: false, message: GENERIC_FAILURE };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Catalog search for the in-session picker.
+ *
+ * A server action rather than a route handler: the picker runs inside a Client
+ * Component, and this reuses `searchExercises` — the same query, ordering and
+ * wildcard escaping as the library page. Capped at 8 because the sheet is a
+ * "which of these did you mean" list, not a browser.
+ */
+export async function searchCatalog(query: string): Promise<ExerciseSummary[]> {
+  const trimmed = query.trim();
+  if (trimmed === "") return [];
+
+  const result = await searchExercises({ q: trimmed });
+  return result.items.slice(0, 8);
+}
+
+/**
+ * Put a catalog exercise into a workout on a future date.
+ *
+ * "Future workout" is modelled as a session with `scheduledFor` set: it already
+ * has the blocks and the logging screen, so nothing has to be converted when the
+ * day arrives. Reusing an existing scheduled session for the same date keeps
+ * "add three exercises to Saturday" from creating three sessions.
+ *
+ * `startedAt` stays at creation time on purpose — it is when the row was made,
+ * and "in progress" is decided by `scheduledFor`, not by that timestamp.
+ */
+export async function scheduleExercise(input: {
+  datasetId: string;
+  date: string;
+}): Promise<WorkoutMutationResult & { sessionId?: string }> {
+  const parsed = scheduleExerciseSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, message: firstValidationMessage(parsed.error) };
+  }
+
+  const user = await getCurrentUser();
+  const today = todayIso(user.timezone);
+
+  if (parsed.data.date < today) {
+    return { ok: false, message: "Pick today or a future date." };
+  }
+
+  try {
+    const exercise = await prisma.exercise.findUnique({
+      where: { datasetId: parsed.data.datasetId },
+      select: { id: true, name: true, nameKey: true },
+    });
+
+    if (exercise === null) {
+      return { ok: false, message: "Exercise not found." };
+    }
+
+    const scheduledFor = parseIsoDate(parsed.data.date);
+
+    // Auto-name, so scheduling stays a two-tap action. "Sat, 24 Oct" fits the
+    // 80-char column with room to spare.
+    const name = new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: user.timezone,
+    }).format(scheduledFor);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const existingSession = await tx.workoutSession.findFirst({
+        where: { userId: user.id, completedAt: null, scheduledFor },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+
+      const session =
+        existingSession ??
+        (await tx.workoutSession.create({
+          data: { userId: user.id, name, scheduledFor },
+          select: { id: true },
+        }));
+
+      const existingBlock = await tx.workoutExercise.findFirst({
+        where: { sessionId: session.id, nameKey: exercise.nameKey },
+        select: { id: true },
+      });
+
+      if (existingBlock === null) {
+        const highest = await tx.workoutExercise.aggregate({
+          where: { sessionId: session.id },
+          _max: { position: true },
+        });
+
+        await tx.workoutExercise.create({
+          data: {
+            sessionId: session.id,
+            exerciseId: exercise.id,
+            name: capitalizeExerciseName(exercise.name),
+            nameKey: exercise.nameKey,
+            position: (highest._max.position ?? -1) + 1,
+          },
+        });
+      }
+
+      return { sessionId: session.id };
+    });
+
+    revalidatePath(WORKOUTS_PATH);
+    revalidatePath(sessionPath(result.sessionId));
+    revalidatePath(`/exercises/${parsed.data.datasetId}`);
+
+    return { ok: true, sessionId: result.sessionId };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      // Two tabs scheduled the same exercise at once; the second one lost the
+      // race but the outcome it wanted is already true.
+      return { ok: true };
+    }
+
+    console.error("Failed to schedule exercise:", error);
+    return { ok: false, message: GENERIC_FAILURE };
+  }
+}
+
 export async function deleteSet(setId: string): Promise<WorkoutMutationResult> {
   const parsed = deleteSetSchema.safeParse({ id: setId });
 

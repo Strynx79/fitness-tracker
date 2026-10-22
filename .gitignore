@@ -57,3 +57,6 @@ next-env.d.ts
 
 # local database dumps (`npm run db:backup`)
 backups/
+
+# tasteskill working files (screenshots, direction sheet)
+.taste-skill/

@@ -257,32 +257,89 @@ export async function getExercise(datasetId: string): Promise<ExerciseDetail | n
 }
 
 /**
- * Distinct facet values for the filter selects.
+ * One facet value with the number of catalog rows behind it.
  *
- * Two `groupBy` queries instead of one `findMany({ distinct })`: each one scans
- * a single indexed column (`exercises_body_part_idx` / `exercises_equipment_idx`)
- * and returns ~10 / ~28 rows, so the cost is a pair of small index scans over
- * 1,324 rows. `Promise.all` keeps them in one round trip. If the catalog ever
- * grows or these lists become user-editable, promote this to a cached query
+ * The count is what turns the filter list into a ledger: the library's shape is
+ * visible before a single search, and every figure is computed from the same
+ * table the results come from.
+ */
+export type ExerciseFacet = {
+  value: string;
+  count: number;
+};
+
+/** A facet group and the size of the set it is counting within. */
+export type ExerciseFacetGroup = {
+  options: ExerciseFacet[];
+  /** Rows matching the *other* active filters — what the group's "All" row shows. */
+  total: number;
+};
+
+/**
+ * Facet values and their counts, scoped to the current search.
+ *
+ * The counts have to agree with the results header, so each group is counted
+ * against the other filters but not against itself: with `?q=bench&equipment=dumbbell`
+ * the body-part counts answer "how many bench exercises per body part with
+ * dumbbells", and the equipment counts still let the reader switch equipment
+ * without the list collapsing to the one already chosen. Counting the groups
+ * catalog-wide instead would let the rail say "Chest 163" above a header
+ * reading "1–8 of 8", which costs more trust than a missing figure.
+ *
+ * Two `groupBy` queries rather than one `findMany({ distinct })`: each scans a
+ * single indexed column (`exercises_body_part_idx` / `exercises_equipment_idx`)
+ * over 1,324 rows. If the catalog ever grows, promote this to a cached query
  * rather than a per-request one.
  */
-export async function getExerciseFacets(): Promise<{
-  bodyParts: string[];
-  equipment: string[];
-}> {
+export async function getExerciseFacets(
+  params: ExerciseSearchParams = {},
+): Promise<{ bodyParts: ExerciseFacetGroup; equipment: ExerciseFacetGroup }> {
+  // The same normalization `searchExercises` applies, so the rail and the list
+  // can never disagree about what the query means.
+  const query = normalizeFilter(params.q, MAX_QUERY_CHARS);
+  const nameKey =
+    query === undefined
+      ? undefined
+      : { contains: escapeLikePattern(deriveExerciseKey(query)) };
+
+  const bodyPart = normalizeFilter(params.bodyPart, 40);
+  const equipment = normalizeFilter(params.equipment, 40);
+
   const [bodyPartRows, equipmentRows] = await Promise.all([
     prisma.exercise.groupBy({
       by: ["bodyPart"],
+      _count: { _all: true },
+      where: {
+        ...(nameKey === undefined ? {} : { nameKey }),
+        ...(equipment === undefined ? {} : { equipment: equipment.toLowerCase() }),
+      },
       orderBy: { bodyPart: "asc" },
     }),
     prisma.exercise.groupBy({
       by: ["equipment"],
+      _count: { _all: true },
+      where: {
+        ...(nameKey === undefined ? {} : { nameKey }),
+        ...(bodyPart === undefined ? {} : { bodyPart: bodyPart.toLowerCase() }),
+      },
       orderBy: { equipment: "asc" },
     }),
   ]);
 
   return {
-    bodyParts: bodyPartRows.map((row) => row.bodyPart),
-    equipment: equipmentRows.map((row) => row.equipment),
+    bodyParts: {
+      options: bodyPartRows.map((row) => ({
+        value: row.bodyPart,
+        count: row._count._all,
+      })),
+      total: bodyPartRows.reduce((sum, row) => sum + row._count._all, 0),
+    },
+    equipment: {
+      options: equipmentRows.map((row) => ({
+        value: row.equipment,
+        count: row._count._all,
+      })),
+      total: equipmentRows.reduce((sum, row) => sum + row._count._all, 0),
+    },
   };
 }

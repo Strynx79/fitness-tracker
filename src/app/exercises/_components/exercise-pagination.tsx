@@ -12,9 +12,9 @@ type ExercisePaginationProps = {
   pageCount: number;
 };
 
-/** Classes for the edge case: the arrow stays, but it is not a link. */
-const DISABLED_CLASSES =
-  "text-muted-foreground/60 pointer-events-none h-11 gap-1 px-3 opacity-50";
+/** The edge case: the label stays, but it is not a link. */
+const EDGE_CLASSES =
+  "text-muted-foreground pointer-events-none h-9 rounded-md px-3 opacity-50";
 
 /**
  * Prev/next paging for the catalog.
@@ -25,7 +25,8 @@ const DISABLED_CLASSES =
  * silently drop a search.
  *
  * Renders nothing when there is only one page — a disabled pair of arrows over
- * "Page 1 of 1" is furniture, not information.
+ * "Page 1 of 1" is furniture, not information. The result range lives in the
+ * results header, so it is not repeated here.
  */
 export function ExercisePagination({
   filters,
@@ -37,25 +38,38 @@ export function ExercisePagination({
   return (
     <nav
       aria-label="Exercise pages"
-      className="flex items-center justify-between gap-3"
+      className="border-rule flex items-center justify-between gap-3 border-t pt-4"
     >
       {page > 1 ? (
         <Link
           href={buildExercisesHref(filters, page - 1)}
           rel="prev"
-          className={cn(buttonVariants({ variant: "outline" }), "h-11 gap-1 px-3")}
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "border-input bg-card h-9 gap-1 rounded-md px-3 text-sm",
+          )}
         >
           <ChevronLeft aria-hidden className="size-4" />
           Prev
         </Link>
       ) : (
-        <span aria-disabled className={cn(buttonVariants({ variant: "outline" }), DISABLED_CLASSES)}>
+        <span
+          aria-disabled
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "border-input bg-card",
+            EDGE_CLASSES,
+          )}
+        >
           <ChevronLeft aria-hidden className="size-4" />
           Prev
         </span>
       )}
 
-      <p className="text-muted-foreground text-sm tabular-nums" aria-live="polite">
+      <p
+        className="text-muted-foreground font-mono text-xs tabular-nums"
+        aria-live="polite"
+      >
         Page {page} of {pageCount}
       </p>
 
@@ -63,13 +77,23 @@ export function ExercisePagination({
         <Link
           href={buildExercisesHref(filters, page + 1)}
           rel="next"
-          className={cn(buttonVariants({ variant: "outline" }), "h-11 gap-1 px-3")}
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "border-input bg-card h-9 gap-1 rounded-md px-3 text-sm",
+          )}
         >
           Next
           <ChevronRight aria-hidden className="size-4" />
         </Link>
       ) : (
-        <span aria-disabled className={cn(buttonVariants({ variant: "outline" }), DISABLED_CLASSES)}>
+        <span
+          aria-disabled
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "border-input bg-card",
+            EDGE_CLASSES,
+          )}
+        >
           Next
           <ChevronRight aria-hidden className="size-4" />
         </span>

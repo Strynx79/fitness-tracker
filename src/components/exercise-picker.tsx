@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Search } from "lucide-react";
 
+import { addRoutineExercise } from "@/app/routines/actions";
 import { addExerciseBlock, searchCatalog } from "@/app/workouts/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,26 +20,40 @@ import { Separator } from "@/components/ui/separator";
 import { capitalizeExerciseName } from "@/lib/exercise";
 import type { ExerciseSummary } from "@/lib/exercises";
 
-type AddExerciseButtonProps = {
-  sessionId: string;
+/**
+ * Where the picked exercise goes. A workout session and a routine take the same
+ * input and answer the same shape, so one picker serves both screens.
+ */
+export type ExercisePickerTarget =
+  | { kind: "session"; sessionId: string }
+  | { kind: "routine"; routineId: string };
+
+type ExercisePickerButtonProps = {
+  target: ExercisePickerTarget;
+  /** Trigger copy, e.g. "Add exercise". */
+  label?: string;
+  className?: string;
 };
 
 /** Long enough to skip a keystroke, short enough to feel immediate. */
 const SEARCH_DEBOUNCE_MS = 250;
 
 /**
- * The "+ Add exercise" control and its search sheet.
+ * The search sheet shared by the session screen and the routine editor.
  *
- * One dialog serves both entry points the user asked for: type "chest press" and
- * pick the variant you meant, or type a name that is not in the catalog and add
- * it as a custom card. The sheet is a "which one did you mean" list (top 8), not
- * a browser — browsing lives in the library tab.
+ * Type "chest press" and pick the variant you meant, or add a custom exercise
+ * that is not in the catalog. The sheet is a "which one did you mean" list (top
+ * 8), not a browser — browsing lives in the library tab.
  *
- * The search runs through a Server Action so it reuses the exact catalog query
+ * Search runs through a Server Action so it reuses the exact catalog query
  * (ordering, pagination, LIKE-escaping) instead of shipping the dataset to the
  * client.
  */
-export function AddExerciseButton({ sessionId }: AddExerciseButtonProps) {
+export function ExercisePickerButton({
+  target,
+  label = "Add exercise",
+  className,
+}: ExercisePickerButtonProps) {
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
@@ -51,8 +66,7 @@ export function AddExerciseButton({ sessionId }: AddExerciseButtonProps) {
 
   // Debounced search. `cancelled` stops a slow response for "che" from landing
   // after the faster one for "chest". Nothing is set synchronously in the effect
-  // body: an empty query simply stops the timer, and the render below hides any
-  // stale results.
+  // body: an empty query stops the timer and the render hides stale results.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed === "") return;
@@ -96,7 +110,10 @@ export function AddExerciseButton({ sessionId }: AddExerciseButtonProps) {
     setError(null);
 
     startTransition(async () => {
-      const result = await addExerciseBlock({ sessionId, ...input });
+      const result =
+        target.kind === "session"
+          ? await addExerciseBlock({ sessionId: target.sessionId, ...input })
+          : await addRoutineExercise({ routineId: target.routineId, ...input });
 
       if (!result.ok) {
         setError(result.message);
@@ -105,26 +122,28 @@ export function AddExerciseButton({ sessionId }: AddExerciseButtonProps) {
 
       setOpen(false);
       reset();
-      // The block list is a Server Component; refresh re-renders the session
-      // with the new card (and its empty table) in place.
+      // The list is a Server Component; refresh re-renders it with the new row.
       router.refresh();
     });
   }
 
   const trimmedQuery = query.trim();
   const trimmedCustom = customName.trim();
-  // A cleared query hides whatever the last search returned without needing an
-  // effect to reset state (which would cascade renders).
   const visibleResults = trimmedQuery === "" ? [] : results;
   const showSearching = trimmedQuery !== "" && searching;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
-        render={<Button variant="outline" className="h-12 w-full gap-2 text-base" />}
+        render={
+          <Button
+            variant="outline"
+            className={className ?? "h-12 w-full gap-2 text-base"}
+          />
+        }
       >
         <Plus aria-hidden className="size-5" />
-        Add exercise
+        {label}
       </DialogTrigger>
 
       <DialogContent>
@@ -193,10 +212,7 @@ export function AddExerciseButton({ sessionId }: AddExerciseButtonProps) {
           <Separator />
 
           <div className="flex flex-col gap-2">
-            <label
-              htmlFor="custom-exercise-name"
-              className="text-sm font-medium"
-            >
+            <label htmlFor="custom-exercise-name" className="text-sm font-medium">
               Custom exercise
             </label>
             <div className="flex gap-2">

@@ -31,6 +31,8 @@ model User {
   dailyMetrics    DailyMetric[]
   habits          Habit[]
   workoutSessions WorkoutSession[]
+  routines        Routine[]
+  measurementTypes MeasurementType[]
 
   @@map("users")
 }
@@ -222,6 +224,7 @@ model Exercise {
 
   sets WorkoutSet[]
   workoutExercises WorkoutExercise[]
+  routineExercises RoutineExercise[]
 
   // Prefix search on the normalized key (the library's `q`) and the three facet
   // filters. Each is a cheap b-tree scan over 1.3k rows.
@@ -230,4 +233,95 @@ model Exercise {
   @@index([equipment])
   @@index([target])
   @@map("exercises")
+}
+
+// ---------------------------------------------------------------------------
+// Slice 12 — Routines (reusable workout templates + weekly schedule)
+// ---------------------------------------------------------------------------
+// A routine is the plan ("Push", "Pull", "Legs"); a WorkoutSession is one
+// execution of it. Starting a routine COPIES its exercises into the session, so
+// editing a routine never rewrites workouts you already did.
+model Routine {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  name        String    @db.VarChar(80)
+  notes       String?   @db.Text
+  // Weekdays this routine is planned for, 0 = Sunday … 6 = Saturday (matching
+  // JS `Date.getDay()`). Empty = an unscheduled template you start by hand.
+  // An array rather than seven booleans: the query is "does this routine run on
+  // day N", which is `weekdays has N`.
+  weekdays    Int[]     @default([])
+  position    Int       @default(0)
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercises RoutineExercise[]
+
+  // "Push" and "push" would be two routines otherwise.
+  @@unique([userId, name])
+  @@index([userId, position])
+  @@map("routines")
+}
+
+model RoutineExercise {
+  id         String  @id @default(cuid())
+  routineId  String  @map("routine_id")
+  exerciseId String? @map("exercise_id")
+  name       String  @db.VarChar(120)
+  nameKey    String  @map("name_key") @db.VarChar(120)
+  position   Int     @default(0)
+  // Planned working sets; NULL = no target ("just do what you feel").
+  targetSets Int?    @map("target_sets")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  routine  Routine   @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  exercise Exercise? @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
+
+  @@unique([routineId, nameKey])
+  @@index([routineId, position])
+  @@map("routine_exercises")
+}
+
+// ---------------------------------------------------------------------------
+// Slice 13 — Body measurements (waist, chest, arm … as many as the user wants)
+// ---------------------------------------------------------------------------
+// A type is user-defined ("Waist", "Chest", "Left arm") with its own unit, so
+// the app never hardcodes a body-part list. Entries are one per type per day.
+model MeasurementType {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  name       String    @db.VarChar(60)
+  // Free-form short unit ("cm", "in", "%"). Kept as text because users mix
+  // metric and imperial per measurement and no conversion is implied.
+  unit       String    @db.VarChar(16)
+  position   Int       @default(0)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries MeasurementEntry[]
+
+  @@unique([userId, name])
+  @@index([userId, archivedAt])
+  @@map("measurement_types")
+}
+
+model MeasurementEntry {
+  id        String   @id @default(cuid())
+  typeId    String   @map("type_id")
+  date      DateTime @db.Date
+  value     Decimal  @db.Decimal(6, 2)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  type MeasurementType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+
+  // One reading per measurement per day; re-entering a date is an upsert.
+  @@unique([typeId, date])
+  @@index([typeId, date])
+  @@map("measurement_entries")
 }

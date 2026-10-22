@@ -3,10 +3,12 @@ import { Suspense } from "react";
 
 import { NewSessionForm } from "@/app/workouts/_components/new-session-form";
 import { SessionList } from "@/app/workouts/_components/session-list";
+import { TodayPlan } from "@/app/workouts/_components/today-plan";
 import { UpcomingList } from "@/app/workouts/_components/upcoming-list";
 import { WorkoutsSkeleton } from "@/app/workouts/_components/workouts-skeleton";
 import { getCurrentUser } from "@/lib/auth";
-import { todayIso } from "@/lib/date";
+import { todayIso, weekdayInZone } from "@/lib/date";
+import { getRoutines } from "@/lib/routines";
 import { getUpcomingWorkouts, getWorkoutSessionList } from "@/lib/workouts";
 
 export const metadata: Metadata = {
@@ -43,13 +45,19 @@ async function WorkoutsContent() {
   const user = await getCurrentUser();
   const today = todayIso(user.timezone);
 
-  const [sessions, upcoming] = await Promise.all([
+  const [sessions, upcoming, routines] = await Promise.all([
     getWorkoutSessionList(user.id, today),
     getUpcomingWorkouts(user.id, today),
+    getRoutines(user.id),
   ]);
+
+  // Routines are planned per weekday in the user's own calendar.
+  const weekday = weekdayInZone(new Date(), user.timezone);
+  const todayPlan = routines.filter((routine) => routine.weekdays.includes(weekday));
 
   return (
     <div className="flex flex-col gap-4">
+      <TodayPlan routines={todayPlan} weekday={weekday} />
       <UpcomingList workouts={upcoming} />
       <NewSessionForm />
       <SessionList sessions={sessions} timezone={user.timezone} />

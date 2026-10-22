@@ -96,3 +96,29 @@ export function isoDateRange(startIso: string, endIso: string): string[] {
   }
   return days;
 }
+
+/**
+ * The weekday (0 = Sunday … 6 = Saturday) of an instant in a given zone.
+ *
+ * Routines are planned per weekday, so "is this Push day?" has to be answered in
+ * the user's calendar, not the server's. `Intl` with `en-US` gives a stable
+ * three-letter name to map from, which avoids `getDay()`'s local-time trap.
+ */
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+export function weekdayInZone(date: Date, timeZone: string): number {
+  const short = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(date);
+
+  return WEEKDAY_INDEX[short] ?? 0;
+}

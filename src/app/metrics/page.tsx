@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
+import { Ruler } from "lucide-react";
 
 import {
   DailyMetricForm,
@@ -58,6 +60,17 @@ export default function MetricsPage({ searchParams }: PageProps<"/metrics">) {
           trend.
         </p>
       </header>
+
+      <Link
+        href="/measurements"
+        className="hover:bg-muted/50 focus-visible:ring-ring/50 flex min-h-14 items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none"
+      >
+        <span className="flex items-center gap-2">
+          <Ruler aria-hidden className="size-4" />
+          <span className="font-medium">Body measurements</span>
+        </span>
+        <span className="text-muted-foreground text-xs">Waist, chest, arms…</span>
+      </Link>
 
       <Suspense fallback={<MetricsSkeleton />}>
         <MetricsContent searchParams={searchParams} />

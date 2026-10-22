@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft } from "lucide-react";
 
-import { AddExerciseButton } from "@/app/workouts/[id]/_components/add-exercise-button";
 import { ExerciseBlock } from "@/app/workouts/[id]/_components/exercise-block";
 import { SessionHeader } from "@/app/workouts/[id]/_components/session-header";
 import { SessionSkeleton } from "@/app/workouts/[id]/_components/session-skeleton";
@@ -15,6 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ExercisePickerButton } from "@/components/exercise-picker";
+import { BackLink } from "@/app/_components/back-link";
 import { getCurrentUser } from "@/lib/auth";
 import { getWorkoutSession } from "@/lib/workouts";
 import { formatCalendarDate, formatInstant } from "@/lib/workout-format";
@@ -35,13 +34,7 @@ export default function WorkoutSessionPage({
 }: PageProps<"/workouts/[id]">) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6">
-      <Link
-        href="/workouts"
-        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex h-11 w-fit items-center gap-1 rounded-lg px-2 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:outline-none"
-      >
-        <ArrowLeft aria-hidden className="size-4" />
-        All workouts
-      </Link>
+      <BackLink href="/workouts" label="All workouts" />
 
       <Suspense fallback={<SessionSkeleton />}>
         <SessionContent params={params} />
@@ -102,7 +95,7 @@ async function SessionContent({
           This session is finished — its sets are history and cannot be edited.
         </p>
       ) : (
-        <AddExerciseButton sessionId={session.id} />
+        <ExercisePickerButton target={{ kind: "session", sessionId: session.id }} />
       )}
     </div>
   );

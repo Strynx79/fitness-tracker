@@ -121,12 +121,18 @@ model WorkoutSession {
   @@map("workout_sessions")
 }
 
-// No Exercise table yet: exerciseName is the display string, exerciseKey is the
-// canonical lookup key (trimmed, lowercased) so "Bench Press" and "bench press"
-// resolve to the same exercise. Promotable to a real table later without loss.
+// exerciseName stays the display string and exerciseKey the canonical lookup
+// key (trimmed, lowercased), so "Bench Press" and "bench press" resolve to the
+// same exercise even for a set that is not linked to the catalog yet.
+//
+// exerciseId is OPTIONAL on purpose: the catalog is global and read-only, while
+// sets are user-authored. A set logged from the library points at a catalog row;
+// a hand-typed custom exercise keeps it NULL, and deleting/rebuilding the
+// catalog must never cascade into someone's training history (hence SetNull).
 model WorkoutSet {
   id           String   @id @default(cuid())
   sessionId    String   @map("session_id")
+  exerciseId   String?  @map("exercise_id")
   exerciseName String   @map("exercise_name") @db.VarChar(120)
   exerciseKey  String   @map("exercise_key") @db.VarChar(120)
   setNumber    Int      @map("set_number") // 1-based, per (session, exercise)
@@ -136,10 +142,55 @@ model WorkoutSet {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  session WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise?      @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
 
   // Idempotent "log a set" (safe on double-submit) + session detail reads.
   @@unique([sessionId, exerciseKey, setNumber])
   @@index([exerciseKey]) // per-exercise history / "previous top set"
+  @@index([exerciseId]) // catalog → "my history with this exercise"
   @@map("workout_sets")
+}
+
+// ---------------------------------------------------------------------------
+// Exercise catalog (global, seeded from prisma/data/exercises.json)
+// ---------------------------------------------------------------------------
+// Vendored from the Gym Visual dataset (1,324 rows), read-only at runtime and
+// shared by every user: no userId, no ownership, no user-specific columns.
+//
+// `nameKey` is deriveExerciseKey(name) — the same trim/collapse/lowercase rule
+// WorkoutSet.exerciseKey uses — so a library pick and a hand-typed name land on
+// one key and the progressive-overload history query keeps working unchanged.
+//
+// imagePath/gifPath are populated now but not served in this slice, so enabling
+// media later is a UI change rather than a migration.
+model Exercise {
+  id               String   @id @default(cuid())
+  datasetId        String   @unique @map("dataset_id") @db.VarChar(8)
+  name             String   @db.VarChar(120)
+  nameKey          String   @map("name_key") @db.VarChar(120)
+  category         String   @db.VarChar(40)
+  bodyPart         String   @map("body_part") @db.VarChar(40)
+  equipment        String   @db.VarChar(40)
+  target           String   @db.VarChar(60)
+  muscleGroup      String?  @map("muscle_group") @db.VarChar(60)
+  secondaryMuscles String[] @map("secondary_muscles")
+  instructionsEn   String   @map("instructions_en") @db.Text
+  stepsEn          String[] @map("steps_en")
+  imagePath        String?  @map("image_path") @db.VarChar(200)
+  gifPath          String?  @map("gif_path") @db.VarChar(200)
+  attribution      String   @db.VarChar(120)
+  youtubeUrl       String?  @map("youtube_url") @db.VarChar(300)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sets WorkoutSet[]
+
+  // Prefix search on the normalized key (the library's `q`) and the three facet
+  // filters. Each is a cheap b-tree scan over 1.3k rows.
+  @@index([nameKey])
+  @@index([bodyPart])
+  @@index([equipment])
+  @@index([target])
+  @@map("exercises")
 }

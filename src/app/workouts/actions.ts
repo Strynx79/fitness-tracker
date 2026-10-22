@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { deriveExerciseKey } from "@/lib/exercise";
+import { capitalizeExerciseName, deriveExerciseKey } from "@/lib/exercise";
 import {
   createSessionSchema,
   deleteSetSchema,
@@ -27,6 +27,7 @@ export type WorkoutActionState = {
     name: string;
     notes: string;
     exerciseName: string;
+    exerciseId: string;
     weightKg: string;
     reps: string;
     rpe: string;
@@ -55,11 +56,20 @@ function blankValues(): {
   name: string;
   notes: string;
   exerciseName: string;
+  exerciseId: string;
   weightKg: string;
   reps: string;
   rpe: string;
 } {
-  return { name: "", notes: "", exerciseName: "", weightKg: "", reps: "", rpe: "" };
+  return {
+    name: "",
+    notes: "",
+    exerciseName: "",
+    exerciseId: "",
+    weightKg: "",
+    reps: "",
+    rpe: "",
+  };
 }
 
 /**
@@ -177,6 +187,7 @@ export async function logSet(
   const values = {
     ...blankValues(),
     exerciseName: readField(formData, "exerciseName"),
+    exerciseId: readField(formData, "exerciseId"),
     weightKg: readField(formData, "weightKg"),
     reps: readField(formData, "reps"),
     rpe: readField(formData, "rpe"),
@@ -185,6 +196,7 @@ export async function logSet(
   const parsed = logSetSchema.safeParse({
     sessionId,
     exerciseName: values.exerciseName,
+    exerciseId: values.exerciseId,
     weightKg: values.weightKg,
     reps: values.reps,
     rpe: values.rpe,
@@ -202,9 +214,6 @@ export async function logSet(
       values,
     };
   }
-
-  const exerciseName = parsed.data.exerciseName;
-  const exerciseKey = deriveExerciseKey(exerciseName);
 
   try {
     const outcome = await prisma.$transaction(async (tx) => {
@@ -247,6 +256,43 @@ export async function logSet(
         return { kind: "error" as const, message };
       }
 
+      // Resolve the catalog row (when one was picked) INSIDE the transaction and
+      // after the lock, so the canonical display name cannot be swapped between
+      // the check and the insert.
+      //
+      // The name↔id invariant is enforced HERE, not only in the browser: the
+      // hidden input can survive a no-JS edit to the visible name, so a posted id
+      // is honoured only while the typed name still normalises to the same key
+      // as the catalog row. A mismatch means "the user edited it" → keep the
+      // typed name and store the set as free-typed, exactly as the form promises.
+      const typedKey = deriveExerciseKey(parsed.data.exerciseName);
+      let exerciseName = parsed.data.exerciseName;
+      let exerciseId: string | null = null;
+
+      const requestedExerciseId = parsed.data.exerciseId ?? null;
+
+      if (requestedExerciseId !== null) {
+        const catalogExercise = await tx.exercise.findUnique({
+          where: { id: requestedExerciseId },
+          select: { name: true, nameKey: true },
+        });
+
+        if (catalogExercise === null) {
+          return {
+            kind: "error" as const,
+            message: "That exercise is no longer in the library. Pick it again.",
+            field: "exerciseName" as const,
+          };
+        }
+
+        if (catalogExercise.nameKey === typedKey) {
+          exerciseName = capitalizeExerciseName(catalogExercise.name);
+          exerciseId = requestedExerciseId;
+        }
+      }
+
+      const exerciseKey = deriveExerciseKey(exerciseName);
+
       // Per-exercise numbering, matching `@@unique([sessionId, exerciseKey,
       // setNumber])`. The lock above serializes writers, so this `_max` sees
       // every committed set; the unique constraint stays as the backstop and
@@ -260,11 +306,12 @@ export async function logSet(
       await tx.workoutSet.create({
         data: {
           sessionId: parsed.data.sessionId,
-          // Display name as typed, canonical key as derived: both are stored so
-          // the UI can render the first and the history query can match the
-          // second.
+          // Display name as typed (or as the catalog spells it), canonical key as
+          // derived: both are stored so the UI can render the first and the
+          // history query can match the second.
           exerciseName,
           exerciseKey,
+          exerciseId,
           setNumber,
           // Already bounded to two decimals by the schema, so the number's
           // shortest round-trip representation is exactly what the user typed.
@@ -279,13 +326,17 @@ export async function logSet(
     });
 
     if (outcome.kind === "error") {
-      // Anchored to `sessionId` as well as `message`: every visible field is
-      // valid here, so without a field the form has nothing to mark and the
-      // failure would read like a problem with the exercise name.
+      // A catalog failure belongs on the exercise field; every other failure here
+      // is about the session, and anchoring it there keeps the form from blaming
+      // a field the user never touched.
+      const anchor =
+        "field" in outcome && outcome.field === "exerciseName"
+          ? "exerciseName"
+          : "sessionId";
       return {
         status: "error",
         message: outcome.message,
-        fieldErrors: { sessionId: [outcome.message] },
+        fieldErrors: { [anchor]: [outcome.message] },
         values,
       };
     }

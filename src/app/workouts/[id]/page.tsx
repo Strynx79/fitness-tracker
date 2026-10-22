@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Library } from "lucide-react";
 
 import { ExerciseGroup } from "@/app/workouts/[id]/_components/exercise-group";
 import { LogSetForm } from "@/app/workouts/[id]/_components/log-set-form";
 import { SessionHeader } from "@/app/workouts/[id]/_components/session-header";
 import { SessionSkeleton } from "@/app/workouts/[id]/_components/session-skeleton";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -16,10 +17,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import {
-  getExerciseSuggestions,
-  getWorkoutSession,
-} from "@/lib/workouts";
+import { capitalizeExerciseName } from "@/lib/exercise";
+import { getExercise } from "@/lib/exercises";
+import { cn } from "@/lib/utils";
+import { getExerciseSuggestions, getWorkoutSession } from "@/lib/workouts";
 import { formatInstant } from "@/lib/workout-format";
 
 export const metadata: Metadata = {
@@ -35,6 +36,7 @@ export const metadata: Metadata = {
  */
 export default function WorkoutSessionPage({
   params,
+  searchParams,
 }: PageProps<"/workouts/[id]">) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6">
@@ -47,7 +49,7 @@ export default function WorkoutSessionPage({
       </Link>
 
       <Suspense fallback={<SessionSkeleton />}>
-        <SessionContent params={params} />
+        <SessionContent params={params} searchParams={searchParams} />
       </Suspense>
     </main>
   );
@@ -55,18 +57,40 @@ export default function WorkoutSessionPage({
 
 async function SessionContent({
   params,
-}: Pick<PageProps<"/workouts/[id]">, "params">) {
-  const { id } = await params;
+  searchParams,
+}: Pick<PageProps<"/workouts/[id]">, "params" | "searchParams">) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
   const user = await getCurrentUser();
 
-  const [session, suggestions] = await Promise.all([
+  // A picked catalog exercise arrives as `?exerciseId=0025` — the DATASET id, so
+  // library URLs stay stable. The internal row id is resolved here, server-side,
+  // and only that resolved id ever reaches the form.
+  const rawDatasetId = query.exerciseId;
+  const datasetId = (
+    typeof rawDatasetId === "string"
+      ? rawDatasetId
+      : Array.isArray(rawDatasetId)
+        ? (rawDatasetId[0] ?? "")
+        : ""
+  ).trim();
+
+  const [session, suggestions, catalogExercise] = await Promise.all([
     getWorkoutSession(user.id, id),
     getExerciseSuggestions(user.id),
+    datasetId === "" ? Promise.resolve(null) : getExercise(datasetId),
   ]);
 
   // Missing and not-owned are the same answer. Rendering a blank session here
   // would leak that difference and leave a dead page behind a stale link.
   if (session === null) notFound();
+
+  const prefill =
+    catalogExercise === null
+      ? undefined
+      : {
+          exerciseId: catalogExercise.id,
+          exerciseName: capitalizeExerciseName(catalogExercise.name),
+        };
 
   return (
     <div className="flex flex-col gap-4">
@@ -88,7 +112,21 @@ async function SessionContent({
           This session is finished.
         </p>
       ) : (
-        <LogSetForm sessionId={session.id} suggestions={suggestions} />
+        <>
+          <LogSetForm
+            key={prefill?.exerciseId ?? "free-typed"}
+            sessionId={session.id}
+            suggestions={suggestions}
+            prefill={prefill}
+          />
+          <Link
+            href="/exercises"
+            className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full gap-2")}
+          >
+            <Library aria-hidden className="size-4" />
+            Browse the exercise library
+          </Link>
+        </>
       )}
 
       {session.groups.length === 0 ? (

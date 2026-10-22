@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Dumbbell, Flame, House } from "lucide-react";
+import { Activity, Dumbbell, Flame, House, Library } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,7 @@ const TABS = [
   { href: "/", label: "Home", icon: House },
   { href: "/metrics", label: "Metrics", icon: Activity },
   { href: "/habits", label: "Habits", icon: Flame },
+  { href: "/exercises", label: "Exercises", icon: Library },
   { href: "/workouts", label: "Workouts", icon: Dumbbell },
 ] as const;
 
@@ -42,7 +43,8 @@ export function AppNav() {
       aria-label="Primary"
       className="bg-background/95 supports-[backdrop-filter]:bg-background/80 fixed inset-x-0 bottom-0 z-50 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur"
     >
-      <ul className="mx-auto grid w-full max-w-2xl grid-cols-4">
+      {/* Five tabs at 56px each still fit a 360px viewport (72px per tab). */}
+      <ul className="mx-auto grid w-full max-w-2xl grid-cols-5">
         {TABS.map((tab) => (
           <li key={tab.href}>
             <Suspense fallback={<TabLink tab={tab} active={false} />}>

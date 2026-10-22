@@ -6,6 +6,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { addDays, parseIsoDate, todayIso } from "../src/lib/date";
 import { DEV_USER_ID } from "../src/lib/dev-user";
 import { deriveExerciseKey } from "../src/lib/exercise";
+import { seedExerciseCatalog } from "./exercise-catalog";
 
 // Seed runs outside Next.js (via tsx), so it builds its own client instead of
 // importing src/lib/db.ts — that module resolves "@/..." aliases tsx can't see.
@@ -827,6 +828,15 @@ async function main() {
     `Seeded ${workout.sessions} workout sessions and ${workout.sets} set rows for ${user.id} ` +
       `(${sessionCount} sessions / ${setCount} set rows total; ` +
       `ws_seed_push_active left in progress)`,
+  );
+
+  // Exercise catalog — global, so it is seeded after (and independently of) the
+  // per-user fixtures. Re-running is a no-op except for rows that drifted.
+  const catalog = await seedExerciseCatalog(prisma);
+
+  console.log(
+    `Seeded exercise catalog: ${catalog.inserted} inserted, ${catalog.updated} updated ` +
+      `(${catalog.total} catalog rows total)`,
   );
 }
 

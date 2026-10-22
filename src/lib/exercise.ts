@@ -19,6 +19,114 @@ export function deriveExerciseKey(name: string): string {
 }
 
 /**
+ * The dataset stores every name in lowercase ("barbell bench press"), which
+ * reads like a search query rather than a title. Only the first character is
+ * raised: `toLowerCase()` on the rest would mangle "EZ barbell" / "3/4 sit-up".
+ */
+export function capitalizeExerciseName(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "";
+  return trimmed[0].toUpperCase() + trimmed.slice(1);
+}
+
+/** YouTube ids are 11 chars of base64url: letters, digits, `-` and `_`. */
+const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+/**
+ * Escape LIKE wildcards in a search term.
+ *
+ * Prisma's `contains` compiles to a parameterized `LIKE '%term%'`, so there is no
+ * injection risk — but Prisma does NOT escape `%` or `_`, which Postgres reads as
+ * wildcards. Without this, typing "bench%" matches the entire catalog. Backslash
+ * is escaped first so the escapes added afterwards survive.
+ */
+export function escapeLikePattern(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/[%_]/g, "\\$&");
+}
+
+/**
+ * Pull the video id out of a YouTube URL, or `null` if there is not one.
+ *
+ * The catalog's `youtubeUrl` column is free text (curated by hand, nullable), so
+ * the detail page cannot trust it. Returning `null` rather than a best-effort
+ * guess is what makes the page fall back to a search link instead of rendering
+ * an iframe pointed at something arbitrary.
+ *
+ * Accepted shapes, all with or without `www.` / `m.`:
+ *   - https://www.youtube.com/watch?v=<id>
+ *   - https://youtu.be/<id>
+ *   - https://www.youtube.com/shorts/<id>  (also `/embed/` and `/live/`)
+ */
+export function extractYouTubeId(url: string | null | undefined): string | null {
+  if (typeof url !== "string") return null;
+
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    // A bare id or a half-pasted URL is not something we can embed.
+    return null;
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
+
+  if (host === "youtu.be") {
+    const id = parsed.pathname.split("/").filter(Boolean)[0] ?? "";
+    return YOUTUBE_ID_PATTERN.test(id) ? id : null;
+  }
+
+  if (host !== "youtube.com" && host !== "youtube-nocookie.com") return null;
+
+  const fromQuery = parsed.searchParams.get("v");
+  if (fromQuery !== null) {
+    return YOUTUBE_ID_PATTERN.test(fromQuery) ? fromQuery : null;
+  }
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const [kind, id] = segments;
+  if (kind === "embed" || kind === "shorts" || kind === "live") {
+    return id !== undefined && YOUTUBE_ID_PATTERN.test(id) ? id : null;
+  }
+
+  return null;
+}
+
+/**
+ * Clamp a requested page into the range that actually exists.
+ *
+ * Lives here (not in `@/lib/exercises`) so it stays Prisma-free and unit-testable:
+ * `exercises.ts` is `server-only`, and importing it from a test would drag the
+ * database client — and `DATABASE_URL` — into a DB-free test run.
+ *
+ * `pageCount` is never 0: an empty result set still has one (empty) page, so the
+ * UI can render "Page 1 of 1" instead of dividing by zero. An out-of-range
+ * request (page 9 of 3, page 0, or a stale bookmark after filtering) is clamped
+ * rather than rejected, so a deep link degrades to the nearest real page instead
+ * of throwing or flashing an empty list while data exists.
+ */
+export function resolvePage(
+  requested: number | undefined,
+  total: number,
+  pageSize: number,
+): { page: number; pageCount: number } {
+  // Defensive against callers passing raw searchParam numbers: a NaN page, a
+  // fractional page or a bogus page size must not reach Prisma's `skip`.
+  const size = Number.isFinite(pageSize) && pageSize >= 1 ? Math.floor(pageSize) : 1;
+  const rowCount = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+  const pageCount = Math.max(1, Math.ceil(rowCount / size));
+
+  const wanted =
+    requested !== undefined && Number.isFinite(requested) ? Math.floor(requested) : 1;
+
+  return { page: Math.min(Math.max(wanted, 1), pageCount), pageCount };
+}
+
+/**
  * The top set of a group, without mutating the input.
  *
  * Heaviest `weightKg` wins, then most `reps`, then the lowest `setNumber` (which

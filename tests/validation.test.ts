@@ -209,3 +209,24 @@ test("isValidTimeZone accepts canonical names and links, rejects garbage", () =>
   assert.equal(isValidTimeZone("Not/AZone"), false);
   assert.equal(isValidTimeZone(""), false);
 });
+
+test("logSetSchema treats a blank catalog id as free-typed, and keeps a real one", () => {
+  // An empty hidden input is "no link"; an absent key stays undefined (the
+  // action collapses both with `?? null`).
+  assert.equal(logSetSchema.parse({ ...validLogSet, exerciseId: "" }).exerciseId, null);
+  assert.equal(logSetSchema.parse(validLogSet).exerciseId, undefined);
+
+  assert.equal(
+    logSetSchema.parse({ ...validLogSet, exerciseId: " clx0abc " }).exerciseId,
+    "clx0abc",
+  );
+
+  // 41 chars exceeds the cuid bound: rejected on the field, not silently cut.
+  assert.equal(
+    issueMessage(
+      logSetSchema.safeParse({ ...validLogSet, exerciseId: "a".repeat(41) }),
+      "exerciseId",
+    ),
+    "That exercise is no longer in the library.",
+  );
+});

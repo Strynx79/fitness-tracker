@@ -82,6 +82,21 @@ export const logSetSchema = z.object({
     .min(1, "Name the exercise.")
     .max(120, "Exercise names must be 120 characters or fewer."),
 
+  // The catalog row this set came from, when the user picked one from the
+  // library. Blank/absent means free-typed, which stays fully supported. Like
+  // `sessionId`, this is a format bound only: whether the row exists is decided
+  // in the action, and the catalog name — not the posted one — becomes the
+  // stored display name, so a hidden id can never disagree with the text.
+  exerciseId: z.preprocess(
+    emptyToNull,
+    z
+      .string("That exercise is no longer in the library.")
+      .trim()
+      .max(40, "That exercise is no longer in the library.")
+      .nullable()
+      .optional(),
+  ),
+
   weightKg: requiredDecimalField({
     label: "Weight",
     min: 0,
@@ -158,6 +173,7 @@ export type WorkoutFieldErrors = Partial<
     | "name" // createSession
     | "notes" // createSession
     | "exerciseName" // logSet
+    | "exerciseId" // logSet — hidden field; surfaces below the exercise input
     | "weightKg" // logSet
     | "reps" // logSet
     | "rpe" // logSet

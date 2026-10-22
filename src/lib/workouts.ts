@@ -414,6 +414,25 @@ export async function getWorkoutSessionList(
 }
 
 /**
+ * The newest session that is still open, if any.
+ *
+ * The library uses this to send a picked exercise straight back to the workout
+ * the user is actually doing. Nothing forbids several open sessions (starting a
+ * second one is allowed), so "newest by startedAt" is the one a user who just
+ * tapped "start a workout" means; `id` breaks exact ties deterministically, the
+ * same way `getLastCompletedWorkout` does.
+ */
+export async function getInProgressSession(
+  userId: string,
+): Promise<{ id: string; name: string } | null> {
+  return prisma.workoutSession.findFirst({
+    where: { userId, completedAt: null },
+    orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+    select: { id: true, name: true },
+  });
+}
+
+/**
  * The most recent COMPLETED session, summarised for the dashboard.
  *
  * `completedAt: { not: null }` is load-bearing: an in-progress session is the

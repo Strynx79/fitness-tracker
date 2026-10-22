@@ -17,6 +17,7 @@
     "db:down": "docker compose down",
     "db:reset": "prisma migrate reset && prisma db seed",
     "db:seed": "prisma db seed",
+    "db:seed-exercises": "tsx prisma/seed-exercises.ts",
     "db:backup": "bash scripts/db-backup.sh",
     "postinstall": "prisma generate"
   },

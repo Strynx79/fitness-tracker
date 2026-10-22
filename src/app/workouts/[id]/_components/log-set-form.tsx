@@ -23,6 +23,11 @@ import { cn } from "@/lib/utils";
 type LogSetFormProps = {
   sessionId: string;
   suggestions: Array<{ exerciseName: string; exerciseKey: string }>;
+  /**
+   * A picked catalog exercise (`/workouts/[id]?exerciseId=…`): pre-fills the
+   * name and carries the row id, so the logged set is linked to the library.
+   */
+  prefill?: { exerciseId: string; exerciseName: string };
 };
 
 const INITIAL_STATE: WorkoutActionState = { status: "idle" };
@@ -45,15 +50,29 @@ function toFieldErrors(errors: string[] | undefined) {
  * After a failed submit `state.values` re-fills the numbers the user typed, so
  * a rejected RPE does not make them re-enter the whole set.
  */
-export function LogSetForm({ sessionId, suggestions }: LogSetFormProps) {
+export function LogSetForm({ sessionId, suggestions, prefill }: LogSetFormProps) {
   const [state, formAction, pending] = useActionState(logSet, INITIAL_STATE);
 
   // Persisted on purpose across submissions — see the doc comment above. Seeded
   // from the echoed values so a failed no-JS submit (full reload) keeps the
-  // name alongside the numeric fields restored by `defaultValue`.
+  // name alongside the numeric fields restored by `defaultValue`. The catalog
+  // link is preference order: echoed value (same page, failed submit) → prefill
+  // (arrived from the library) → nothing.
   const [exerciseName, setExerciseName] = useState(
-    () => state.values?.exerciseName ?? "",
+    () => state.values?.exerciseName || prefill?.exerciseName || "",
   );
+
+  // Kept as one object because the id is only meaningful next to the name it was
+  // picked with: editing the name has to drop the link, and splitting them into
+  // two states is how that invariant gets forgotten.
+  const [picked, setPicked] = useState<{ exerciseId: string; exerciseName: string } | null>(
+    () => {
+      const exerciseId = state.values?.exerciseId || prefill?.exerciseId || "";
+      const linkedName = state.values?.exerciseName || prefill?.exerciseName || "";
+      return exerciseId === "" ? null : { exerciseId, exerciseName: linkedName };
+    },
+  );
+
   const weightRef = useRef<HTMLInputElement>(null);
 
   // On a successful save the form has just reset; put the cursor straight back
@@ -66,7 +85,14 @@ export function LogSetForm({ sessionId, suggestions }: LogSetFormProps) {
 
   const values = state.values ?? { exerciseName: "", weightKg: "", reps: "", rpe: "" };
 
-  const exerciseInvalid = Boolean(state.fieldErrors?.exerciseName?.length);
+  // Both fields describe the same control: `exerciseName` is the visible input,
+  // `exerciseId` is its hidden companion, so one error slot holds the union.
+  const exerciseErrors = [
+    ...(state.fieldErrors?.exerciseName ?? []),
+    ...(state.fieldErrors?.exerciseId ?? []),
+  ];
+
+  const exerciseInvalid = exerciseErrors.length > 0;
   const weightInvalid = Boolean(state.fieldErrors?.weightKg?.length);
   const repsInvalid = Boolean(state.fieldErrors?.reps?.length);
   const rpeInvalid = Boolean(state.fieldErrors?.rpe?.length);
@@ -87,6 +113,7 @@ export function LogSetForm({ sessionId, suggestions }: LogSetFormProps) {
       <CardContent>
         <form action={formAction} className="flex flex-col gap-5">
           <input type="hidden" name="sessionId" defaultValue={sessionId} />
+          <input type="hidden" name="exerciseId" value={picked?.exerciseId ?? ""} />
 
           {sessionError === undefined ? (
             state.status === "idle" || !state.message ? null : (
@@ -127,10 +154,25 @@ export function LogSetForm({ sessionId, suggestions }: LogSetFormProps) {
               enterKeyHint="next"
               placeholder="Bench Press"
               value={exerciseName}
-              onChange={(event) => setExerciseName(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setExerciseName(next);
+                // The hidden id describes the name it was picked with. Once the
+                // text no longer matches, this is a free-typed exercise and the
+                // server must not attach it to the catalog row.
+                if (picked !== null && next !== picked.exerciseName) {
+                  setPicked(null);
+                }
+              }}
               aria-invalid={exerciseInvalid}
               className="h-12 text-base"
             />
+            {picked === null ? null : (
+              <FieldDescription>
+                Linked to the exercise library — you can edit the name, but the
+                set then counts as a free-typed exercise.
+              </FieldDescription>
+            )}
             <datalist id="exercise-name-suggestions">
               {suggestions.map((suggestion) => (
                 <option
@@ -139,7 +181,7 @@ export function LogSetForm({ sessionId, suggestions }: LogSetFormProps) {
                 />
               ))}
             </datalist>
-            <FieldError errors={toFieldErrors(state.fieldErrors?.exerciseName)} />
+            <FieldError errors={toFieldErrors(exerciseErrors)} />
           </Field>
 
           <div className="grid grid-cols-3 gap-3">

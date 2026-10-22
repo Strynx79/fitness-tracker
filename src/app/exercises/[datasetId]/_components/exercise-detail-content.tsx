@@ -13,7 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { capitalizeExerciseName, extractYouTubeId } from "@/lib/exercise";
+import { capitalizeExerciseName } from "@/lib/exercise";
 import { getExercise } from "@/lib/exercises";
 import { getCurrentUser } from "@/lib/auth";
 import { todayIso, addDays } from "@/lib/date";
@@ -53,7 +53,6 @@ export async function ExerciseDetailContent({
   if (exercise === null) notFound();
 
   const name = capitalizeExerciseName(exercise.name);
-  const videoId = extractYouTubeId(exercise.youtubeUrl);
 
   // The dataset repeats muscles across `target`, `muscle_group` and
   // `secondary_muscles` ("abs" often appears in all three). Render each once,
@@ -138,38 +137,28 @@ export async function ExerciseDetailContent({
         <CardHeader>
           <CardTitle>Watch it</CardTitle>
           <CardDescription>
-            {videoId === null
-              ? "Search YouTube for a demonstration of this lift."
-              : "Form demonstration from YouTube."}
+            Opens a YouTube search for a form demonstration of this lift.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {videoId === null ? (
-            <a
-              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(
-                `${exercise.name} form`,
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(buttonVariants({ variant: "outline" }), "h-11 gap-2 px-4")}
-            >
-              <Play aria-hidden className="size-4" />
-              Watch on YouTube
-              <ExternalLink aria-hidden className="size-3.5" />
-            </a>
-          ) : (
-            <div className="bg-muted aspect-video w-full overflow-hidden rounded-lg border">
-              <iframe
-                src={`https://www.youtube-nocookie.com/embed/${videoId}`}
-                title={`${name} demonstration`}
-                className="size-full"
-                loading="lazy"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                referrerPolicy="strict-origin-when-cross-origin"
-                allowFullScreen
-              />
-            </div>
-          )}
+          {/*
+            Deliberately a search link, not a curated embed: with 1,324
+            exercises there is no realistic way to keep one working video per
+            lift, and a dead embed is worse than no embed. The `youtubeUrl`
+            column stays for a future hand-picked set.
+          */}
+          <a
+            href={`https://www.youtube.com/results?search_query=${encodeURIComponent(
+              `${exercise.name} form`,
+            )}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(buttonVariants({ variant: "outline" }), "h-11 gap-2 px-4")}
+          >
+            <Play aria-hidden className="size-4" />
+            Watch on YouTube
+            <ExternalLink aria-hidden className="size-3.5" />
+          </a>
         </CardContent>
       </Card>
 

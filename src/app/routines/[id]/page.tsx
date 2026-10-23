@@ -78,7 +78,7 @@ async function RoutineContent({
       <div className="flex flex-col gap-2">
         <BackLink
           href="/routines"
-          label="Routines"
+          label="Plan"
           className="-ml-2 h-8 px-2 text-[13px]"
         />
 

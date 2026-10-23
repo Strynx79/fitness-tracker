@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { PageShell, ScreenHeader } from "@/app/_components/page-shell";
+import { WorkoutSectionTabs } from "@/app/_components/workout-section-tabs";
 import { formatRoutineCount } from "@/app/routines/_components/format";
 import { NewRoutineForm } from "@/app/routines/_components/new-routine-form";
 import { RoutinesTable } from "@/app/routines/_components/routines-table";
@@ -12,7 +13,7 @@ import { weekdayInZone } from "@/lib/date";
 import { getRoutines, type RoutineSummary } from "@/lib/routines";
 
 export const metadata: Metadata = {
-  title: "Routines",
+  title: "Workouts",
 };
 
 /**
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
  * with two weekdays still counts once.
  */
 function describeRoutines(routines: RoutineSummary[]): string {
-  if (routines.length === 0) return "No routines yet.";
+  if (routines.length === 0) return "0 routines, none scheduled.";
 
   const scheduled = routines.filter(
     (routine) => routine.weekdays.length > 0,
@@ -62,16 +63,15 @@ async function RoutinesContent() {
   return (
     <>
       <ScreenHeader
-        title="Routines"
+        title="Workouts"
         description={describeRoutines(routines)}
       />
+
+      <WorkoutSectionTabs active="plan" />
 
       <WeekStrip
         routines={routines}
         todayWeekday={todayWeekday}
-        // The header-to-first-block rhythm on data screens is 60px; PageShell
-        // already supplies 24px of it.
-        className="mt-9"
       />
 
       <RoutinesTable routines={routines} />
@@ -85,11 +85,13 @@ function RoutinesSkeleton() {
   return (
     <div aria-hidden className="flex flex-col gap-6">
       <div className="flex flex-col gap-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Routines</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Workouts</h1>
         <Skeleton className="h-4 w-64" />
       </div>
 
-      <div className="bg-card mt-9 flex flex-col gap-4 rounded-lg p-5 sm:p-6">
+      <WorkoutSectionTabs active="plan" />
+
+      <div className="bg-card flex flex-col gap-4 rounded-lg p-5 sm:p-6">
         <div className="flex items-baseline justify-between">
           <Skeleton className="h-5 w-24" />
           <Skeleton className="h-3 w-20" />

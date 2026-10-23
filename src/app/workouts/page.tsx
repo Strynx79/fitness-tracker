@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { PageShell, ScreenHeader } from "@/app/_components/page-shell";
+import { WorkoutSectionTabs } from "@/app/_components/workout-section-tabs";
 import { NewSessionForm } from "@/app/workouts/_components/new-session-form";
 import { SessionList } from "@/app/workouts/_components/session-list";
 import { TodayPlan, type TodaySession } from "@/app/workouts/_components/today-plan";
@@ -75,9 +76,10 @@ async function WorkoutsContent() {
     getInProgressSession(user.id, today),
   ]);
 
-  // `getWorkoutSessionList` drops rows with no `scheduledFor`, so an ad-hoc
-  // session (the normal "start a workout" flow) cannot be found there while it
-  // is open. The open-session read covers it, and the detail read supplies the
+  // `getInProgressSession` is still needed even though history now includes
+  // `scheduledFor: null` rows: the open session needs its detail read (blocks
+  // and sets) to be shown as today's session, which the list summary lacks.
+  // The detail read supplies the
   // exercise names the panel needs.
   const openDetail =
     openSession === null
@@ -111,7 +113,7 @@ async function WorkoutsContent() {
         ? "In progress now."
         : todaySession !== null
           ? "Planned for today."
-          : "No sessions yet.";
+          : "0 sessions logged.";
 
   // The session in the panel above is not history yet — showing it twice would
   // make today's workout read as something that already happened. Any other
@@ -137,7 +139,9 @@ async function WorkoutsContent() {
         }
       />
 
-      <TodayPlan session={todaySession} isInProgress={isInProgress} className="mt-9" />
+      <WorkoutSectionTabs active="history" />
+
+      <TodayPlan session={todaySession} isInProgress={isInProgress} />
 
       <UpcomingList workouts={upcoming} />
 

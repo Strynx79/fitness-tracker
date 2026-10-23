@@ -20,10 +20,22 @@ type Tab = (typeof TABS)[number];
 /**
  * Prefix matching keeps `/workouts/[id]` on the Workouts tab, but `/` must be
  * exact — otherwise every route starts with "/" and Home is always active.
+ *
+ * `/routines` is the plan view of the same section (see `WorkoutSectionTabs`),
+ * so it lights the same tab: the tab bar has five slots and the plan and the log
+ * are two halves of one destination.
  */
+const SECTION_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  "/workouts": ["/routines"],
+};
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+
+  return (SECTION_ALIASES[href] ?? []).some(
+    (alias) => pathname === alias || pathname.startsWith(`${alias}/`),
+  );
 }
 
 /**

@@ -1,5 +1,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
+import { WorkoutSectionTabs } from "@/app/_components/workout-section-tabs";
+
 /**
  * The streaming fallback.
  *
@@ -19,7 +21,9 @@ export function WorkoutsSkeleton() {
         <Skeleton className="h-4 w-28" />
       </div>
 
-      <div className="bg-card mt-9 rounded-lg p-5 sm:p-6">
+      <WorkoutSectionTabs active="history" />
+
+      <div className="bg-card rounded-lg p-5 sm:p-6">
         <Skeleton className="h-5 w-32" />
         <div className="mt-3 space-y-1.5">
           <Skeleton className="h-4 w-52 max-w-full" />

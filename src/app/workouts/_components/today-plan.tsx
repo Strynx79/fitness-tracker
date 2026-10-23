@@ -43,10 +43,10 @@ export function TodayPlan({ session, isInProgress, className }: TodayPlanProps) 
             Nothing scheduled for today.
           </p>
           <Link
-            href="#start-session"
+            href="/routines"
             className="focus-visible:ring-ring/50 inline-flex h-11 items-center rounded-md text-sm font-medium underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
           >
-            Start a workout
+            Plan the week
           </Link>
         </div>
       ) : (

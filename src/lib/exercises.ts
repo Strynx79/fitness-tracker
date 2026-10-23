@@ -2,7 +2,12 @@ import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { deriveExerciseKey, escapeLikePattern, resolvePage } from "@/lib/exercise";
+import {
+  escapeLikePattern,
+  rankExerciseMatches,
+  resolvePage,
+  searchTokens,
+} from "@/lib/exercise";
 
 /**
  * Read model for the global exercise catalog (prisma/data/exercises.json).
@@ -121,19 +126,19 @@ const SUMMARY_SELECT = {
 /**
  * One page of the catalog, optionally filtered by text and two facets.
  *
- * `q` matches `nameKey`, which is already `deriveExerciseKey`-normalized, so
- * `contains` is a plain case-sensitive match on lowercase text — `mode:
- * "insensitive"` would only add a function call per row. The query is
- * normalized with the same helper instead of `toLowerCase()` so a typed
- * "Bench   Press" (collapsed runs) still matches the stored key.
+ * TEXT SEARCH IS TOKEN-AND, NOT SUBSTRING. The query is split into words and
+ * every word must appear somewhere in `nameKey`, in any order. A plain
+ * `contains "<whole query>"` was the earlier behaviour and it could never match
+ * "incline dumbbell press" against the stored "dumbbell incline press", which is
+ * exactly how people type it.
  *
- * Ordering is `name asc, id asc`: name alone is not unique in a 1.3k-row
- * dataset, and an unstable tie-break lets a row appear on two pages (or none)
- * as Postgres re-plans. `id` (cuid, non-null) makes the order total.
+ * Because all tokens must match, matching rows are ranked in JS — exact name,
+ * then prefix, then phrase-on-a-word-boundary, then the rest — and paged from the
+ * ranked list. That is affordable because the catalog is ~1.3k rows; the
+ * no-query path still pages in SQL so ordinary browsing never reads the table.
  *
- * Two round trips, count first: the clamp needs `total` before `skip` can be
- * computed. `Promise.all` would fire the page query with an unclamped skip, and
- * a `$transaction` cannot feed the count back into the second query.
+ * Filters (`bodyPart`, `equipment`) are applied in SQL in both paths. Facet
+ * values are stored lowercase, so they are lowercased before matching.
  */
 export async function searchExercises(
   params: ExerciseSearchParams = {},
@@ -141,8 +146,13 @@ export async function searchExercises(
   const where: Prisma.ExerciseWhereInput = {};
 
   const query = normalizeFilter(params.q, MAX_QUERY_CHARS);
-  if (query !== undefined) {
-    where.nameKey = { contains: escapeLikePattern(deriveExerciseKey(query)) };
+  const tokens = query === undefined ? [] : searchTokens(query);
+
+  if (tokens.length > 0) {
+    // One `AND` entry per token: every word has to appear, order-independent.
+    where.AND = tokens.map((token) => ({
+      nameKey: { contains: escapeLikePattern(token) },
+    }));
   }
 
   // Facet values are stored lowercase in the dataset, so the raw searchParam is
@@ -155,6 +165,38 @@ export async function searchExercises(
   const equipment = normalizeFilter(params.equipment, 40);
   if (equipment !== undefined) {
     where.equipment = equipment.toLowerCase();
+  }
+
+  if (tokens.length > 0) {
+    // Read the matches, rank them, then slice. Bounded by the catalog size, and
+    // only on the path where a query was actually typed.
+    const rows = await prisma.exercise.findMany({
+      where,
+      select: { ...SUMMARY_SELECT, nameKey: true },
+    });
+
+    const ranked = rankExerciseMatches(rows, query ?? "");
+    const { page, pageCount } = resolvePage(
+      normalizePage(params.page),
+      ranked.length,
+      EXERCISES_PAGE_SIZE,
+    );
+
+    const start = (page - 1) * EXERCISES_PAGE_SIZE;
+
+    const items: ExerciseSummary[] = ranked
+      .slice(start, start + EXERCISES_PAGE_SIZE)
+      .map((row) => ({
+        datasetId: row.datasetId,
+        name: row.name,
+        equipment: row.equipment,
+        bodyPart: row.bodyPart,
+        target: row.target,
+        muscleGroup: row.muscleGroup,
+        imagePath: row.imagePath,
+      }));
+
+    return { items, total: ranked.length, page, pageCount };
   }
 
   const total = await prisma.exercise.count({ where });

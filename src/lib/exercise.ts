@@ -163,3 +163,60 @@ export function pickTopSet<T extends { weightKg: number; reps: number; setNumber
 
   return best;
 }
+
+/**
+ * Split a raw query into the words a name has to contain.
+ *
+ * Search is order-insensitive because exercise names are: someone types
+ * "incline dumbbell press" for "dumbbell incline press" and both describe the
+ * same lift. Duplicates are dropped so "press press" does not search twice for
+ * something the SQL already requires once.
+ */
+export function searchTokens(query: string): string[] {
+  const normalized = deriveExerciseKey(query);
+  if (normalized === "") return [];
+
+  return [...new Set(normalized.split(" "))];
+}
+
+/**
+ * Order matches by how directly they answer the query.
+ *
+ * With token matching every result contains all the words, so ranking is what
+ * separates "Dumbbell Incline Press" from a longer name that merely contains
+ * them: exact name first, then a name starting with the phrase, then the phrase
+ * anywhere on a word boundary, then the rest.
+ *
+ * Ranking only ever sees rows that already contain every token, so the tie-break
+ * is simply "shorter name first": a name made of just the typed words ("Dumbbell
+ * Incline Press") beats one with extra qualifiers ("Dumbbell Incline Bench Press
+ * Machine"), which is the more specific lift.
+ */
+export function rankExerciseMatches<T extends { nameKey: string }>(
+  rows: readonly T[],
+  query: string,
+): T[] {
+  const normalized = deriveExerciseKey(query);
+  if (normalized === "") return [...rows];
+
+  const phraseScore = (nameKey: string): number => {
+    if (nameKey === normalized) return 0;
+    if (nameKey.startsWith(normalized)) return 1;
+    if (nameKey.includes(` ${normalized}`)) return 2;
+    if (nameKey.includes(normalized)) return 3;
+    return 4;
+  };
+
+  return [...rows].sort((a, b) => {
+    const byPhrase = phraseScore(a.nameKey) - phraseScore(b.nameKey);
+    if (byPhrase !== 0) return byPhrase;
+
+    // Shorter names are the more specific lift ("Bench Press" before
+    // "Bench Press Machine Decline Wide Grip").
+    if (a.nameKey.length !== b.nameKey.length) {
+      return a.nameKey.length - b.nameKey.length;
+    }
+
+    return a.nameKey.localeCompare(b.nameKey);
+  });
+}

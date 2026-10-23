@@ -7,7 +7,9 @@ import {
   deriveExerciseKey,
   escapeLikePattern,
   extractYouTubeId,
+  rankExerciseMatches,
   resolvePage,
+  searchTokens,
 } from "@/lib/exercise";
 
 /**
@@ -172,4 +174,49 @@ test("escapeLikePattern neutralises LIKE wildcards without touching letters", ()
   assert.equal(escapeLikePattern("b_nch"), "b\\_nch");
   // Backslash first, so the escapes added afterwards are not double-escaped.
   assert.equal(escapeLikePattern("a\\b%"), "a\\\\b\\%");
+});
+
+test("searchTokens splits on words, any order, without duplicates", () => {
+  assert.deepEqual(searchTokens("Incline  Dumbbell Press"), [
+    "incline",
+    "dumbbell",
+    "press",
+  ]);
+  assert.deepEqual(searchTokens("press press"), ["press"]);
+  assert.deepEqual(searchTokens("   "), []);
+});
+
+test("rankExerciseMatches puts the reordered phrase first", () => {
+  // The reported case: typing the words in a different order from the dataset
+  // name must still surface that exercise, and rank it above other lifts that
+  // merely contain the same words.
+  // All rows contain every token (that is what the SQL filter guarantees); the
+  // ranking decides which of them the user actually meant.
+  const rows = [
+    { nameKey: "dumbbell incline bench press" },
+    { nameKey: "dumbbell incline press" },
+  ];
+
+  assert.deepEqual(
+    rankExerciseMatches(rows, "incline dumbbell press").map((row) => row.nameKey),
+    ["dumbbell incline press", "dumbbell incline bench press"],
+  );
+});
+
+test("rankExerciseMatches prefers a prefix match over a mid-name match", () => {
+  const rows = [
+    { nameKey: "cable bench press" },
+    { nameKey: "bench press machine" },
+    { nameKey: "bench press" },
+  ];
+
+  assert.deepEqual(
+    rankExerciseMatches(rows, "bench press").map((row) => row.nameKey),
+    ["bench press", "bench press machine", "cable bench press"],
+  );
+});
+
+test("rankExerciseMatches leaves rows untouched without a query", () => {
+  const rows = [{ nameKey: "b" }, { nameKey: "a" }];
+  assert.deepEqual(rankExerciseMatches(rows, "").map((row) => row.nameKey), ["b", "a"]);
 });

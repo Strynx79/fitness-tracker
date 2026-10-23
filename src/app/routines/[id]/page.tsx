@@ -6,7 +6,7 @@ import { ExternalLink } from "lucide-react";
 
 import { BackLink } from "@/app/_components/back-link";
 import { RoutineControls } from "@/app/routines/[id]/_components/routine-controls";
-import { RoutineExerciseRow } from "@/app/routines/[id]/_components/routine-exercise-row";
+import { RemoveRoutineExerciseButton } from "@/app/routines/[id]/_components/routine-exercise-row";
 import { StartRoutineButton } from "@/app/routines/_components/start-routine-button";
 import { ExercisePickerButton } from "@/components/exercise-picker";
 import {
@@ -111,7 +111,7 @@ async function RoutineContent({
                     )}
                   </div>
 
-                  <RoutineExerciseRow
+                  <RemoveRoutineExerciseButton
                     id={exercise.id}
                     name={exercise.name}
                   />

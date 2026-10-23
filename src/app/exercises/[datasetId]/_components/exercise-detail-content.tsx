@@ -1,18 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, Play } from "lucide-react";
 
+import { BackLink } from "@/app/_components/back-link";
+import { ScreenHeader } from "@/app/_components/page-shell";
 import { ScheduleExerciseButton } from "@/app/exercises/[datasetId]/_components/schedule-exercise-button";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { capitalizeExerciseName } from "@/lib/exercise";
 import {
   GYM_VISUAL_ATTRIBUTION,
@@ -20,13 +12,30 @@ import {
 } from "@/lib/exercise-media";
 import { getExercise } from "@/lib/exercises";
 import { getCurrentUser } from "@/lib/auth";
-import { todayIso, addDays } from "@/lib/date";
+import { todayIso } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { getInProgressSession } from "@/lib/workouts";
 
 type ExerciseDetailContentProps = {
   params: PageProps<"/exercises/[datasetId]">["params"];
 };
+
+/**
+ * "Body part · Equipment · Target", the three facts that identify a movement.
+ *
+ * The middle dot is the same separator the library's phone sublines use.
+ */
+function describeExercise(exercise: {
+  bodyPart: string;
+  equipment: string;
+  target: string;
+}): string {
+  return [
+    capitalizeExerciseName(exercise.bodyPart),
+    capitalizeExerciseName(exercise.equipment),
+    capitalizeExerciseName(exercise.target),
+  ].join(" · ");
+}
 
 /**
  * The streamed half of the detail page.
@@ -40,7 +49,6 @@ export async function ExerciseDetailContent({
   const { datasetId } = await params;
   const user = await getCurrentUser();
   const today = todayIso(user.timezone);
-  const tomorrow = addDays(today, 1);
 
   // Both reads are request-shaped and belong inside this boundary. The open
   // session decides whether the CTA can send the pick straight back to a workout
@@ -58,44 +66,80 @@ export async function ExerciseDetailContent({
   const gifUrl = exerciseMediaUrl(exercise.gifPath);
 
   // The dataset repeats muscles across `target`, `muscle_group` and
-  // `secondary_muscles` ("abs" often appears in all three). Render each once,
-  // in priority order, so the badge row reads as a list rather than a tally.
-  const muscles: string[] = [];
-  const seenMuscles = new Set<string>();
-  for (const muscle of [
-    exercise.target,
-    exercise.muscleGroup ?? "",
-    ...exercise.secondaryMuscles,
-  ]) {
-    const key = muscle.trim().toLowerCase();
-    if (key === "" || seenMuscles.has(key)) continue;
-    seenMuscles.add(key);
-    muscles.push(muscle.trim());
-  }
+  // `secondary_muscles` ("abs" often appears in all three). The Secondary row
+  // lists each remaining muscle once, never the target it supports.
+  const secondaryMuscles = exercise.secondaryMuscles
+    .map((muscle) => muscle.trim())
+    .filter((muscle, index, all) => {
+      if (muscle === "") return false;
+
+      const key = muscle.toLowerCase();
+      const firstIndex = all.findIndex(
+        (other) => other.toLowerCase() === key,
+      );
+
+      return (
+        firstIndex === index &&
+        key !== exercise.target.trim().toLowerCase() &&
+        key !== (exercise.muscleGroup ?? "").trim().toLowerCase()
+      );
+    });
+
+  const metaRows = [
+    {
+      label: "Body part",
+      value: capitalizeExerciseName(exercise.bodyPart),
+    },
+    {
+      label: "Equipment",
+      value: capitalizeExerciseName(exercise.equipment),
+    },
+    {
+      label: "Target",
+      value: capitalizeExerciseName(exercise.target),
+    },
+    {
+      label: "Secondary",
+      value:
+        secondaryMuscles.length === 0
+          ? "—"
+          : secondaryMuscles.map(capitalizeExerciseName).join(", "),
+    },
+  ];
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold tracking-tight">{name}</h1>
-        <div className="flex flex-wrap gap-2">
-          <Badge>{capitalizeExerciseName(exercise.target)}</Badge>
-          <Badge variant="secondary">
-            {capitalizeExerciseName(exercise.equipment)}
-          </Badge>
-          <Badge variant="outline">
-            {capitalizeExerciseName(exercise.bodyPart)}
-          </Badge>
-        </div>
-      </header>
+    <>
+      <div className="flex flex-col gap-2">
+        <BackLink
+          href="/exercises"
+          label="Library"
+          className="-ml-2 h-10 px-2 text-[13px]"
+        />
 
-      {gifUrl === null ? null : (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2">
+        <ScreenHeader
+          title={name}
+          description={describeExercise(exercise)}
+          action={
+            <ScheduleExerciseButton
+              datasetId={exercise.datasetId}
+              today={today}
+              // "Schedule for today" opens on today's date; a later day is one
+              // pick away in the dialog's own date field.
+              defaultDate={today}
+            />
+          }
+        />
+      </div>
+
+      <div className="flex flex-col gap-6">
+        {gifUrl === null ? null : (
+          <figure className="flex flex-col items-start gap-2">
             {/*
               A plain <img>, not next/image: this is a 180×180 animated GIF, the
               optimizer would need remotePatterns for the dataset host and adds
               nothing at this size. Hotlinked on purpose — the media is © Gym
-              visual and is not vendored into this repository.
+              visual and is not vendored into this repository. The source stays
+              180px; the rendered box is smaller on a phone.
             */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -104,71 +148,93 @@ export async function ExerciseDetailContent({
               width={180}
               height={180}
               loading="lazy"
-              className="bg-muted size-[180px] rounded-lg border object-contain"
+              className="bg-card size-32 rounded object-contain sm:size-40 lg:size-[180px]"
             />
-            <p className="text-muted-foreground text-[0.7rem]">
+            <figcaption className="text-muted-foreground text-[11px] leading-snug">
               {GYM_VISUAL_ATTRIBUTION}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+            </figcaption>
+          </figure>
+        )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>How to do it</CardTitle>
-          <CardDescription>
-            {exercise.stepsEn.length} steps, in order.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Exercise details</caption>
+          <tbody className="divide-rule divide-y">
+            {metaRows.map((row) => (
+              <tr key={row.label} className="h-10">
+                <th scope="row" className="text-left text-sm font-normal">
+                  {row.label}
+                </th>
+                <td className="text-foreground pl-4 text-right text-[13px]">
+                  {row.value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <section
+          aria-labelledby="how-to-do-it"
+          className="flex flex-col gap-3"
+        >
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 id="how-to-do-it" className="text-base leading-snug font-medium">
+              How to do it
+            </h2>
+            {exercise.stepsEn.length === 0 ? null : (
+              <p className="text-muted-foreground font-mono text-xs tabular-nums">
+                {exercise.stepsEn.length} steps
+              </p>
+            )}
+          </div>
+
           {exercise.stepsEn.length === 0 ? (
-            <p className="text-sm leading-relaxed">{exercise.instructionsEn}</p>
+            <p className="max-w-[62ch] text-[15px] leading-[1.6]">
+              {exercise.instructionsEn}
+            </p>
           ) : (
-            <ol className="flex flex-col gap-3">
+            <ol className="marker:text-muted-foreground max-w-[62ch] list-decimal pl-5 text-[15px] leading-[1.6] marker:font-mono marker:text-xs">
               {exercise.stepsEn.map((step, index) => (
-                <li key={`${index}-${step.slice(0, 24)}`} className="flex gap-3">
-                  <span
-                    aria-hidden
-                    className="bg-muted text-muted-foreground mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums"
-                  >
-                    {index + 1}
-                  </span>
-                  <p className="text-sm leading-relaxed">{step}</p>
+                <li
+                  key={`${index}-${step.slice(0, 24)}`}
+                  className="pl-1.5"
+                >
+                  {step}
                 </li>
               ))}
             </ol>
           )}
-        </CardContent>
-      </Card>
+        </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Muscles worked</CardTitle>
-          <CardDescription>
-            Primary target first, then the muscles assisting it.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {muscles.map((muscle, index) => (
-            <Badge
-              key={muscle}
-              // The first entry is `target`; the rest are supporting muscles.
-              variant={index === 0 ? "default" : "outline"}
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+          {inProgress === null ? (
+            <Link
+              href="/workouts"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "bg-card h-11 rounded-md px-4 text-sm",
+              )}
             >
-              {capitalizeExerciseName(muscle)}
-            </Badge>
-          ))}
-        </CardContent>
-      </Card>
+              Start a workout
+            </Link>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <Link
+                href={`/workouts/${inProgress.id}?exerciseId=${encodeURIComponent(
+                  exercise.datasetId,
+                )}`}
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "bg-card h-11 rounded-md px-4 text-sm",
+                )}
+              >
+                Log in “{inProgress.name}”
+              </Link>
+              <p className="text-muted-foreground text-[13px] leading-snug">
+                Opens your workout with this exercise filled in.
+              </p>
+            </div>
+          )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Watch it</CardTitle>
-          <CardDescription>
-            Opens a YouTube search for a form demonstration of this lift.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           {/*
             Deliberately a search link, not a curated embed: with 1,324
             exercises there is no realistic way to keep one working video per
@@ -181,56 +247,23 @@ export async function ExerciseDetailContent({
             )}`}
             target="_blank"
             rel="noopener noreferrer"
-            className={cn(buttonVariants({ variant: "outline" }), "h-11 gap-2 px-4")}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex h-10 items-center rounded-md text-sm font-medium underline underline-offset-4 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
           >
-            <Play aria-hidden className="size-4" />
             Watch on YouTube
-            <ExternalLink aria-hidden className="size-3.5" />
           </a>
-        </CardContent>
-      </Card>
-
-      {inProgress === null ? (
-        <Link
-          href="/workouts"
-          className={cn(buttonVariants(), "h-12 w-full text-base")}
-        >
-          Start a workout
-        </Link>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <Link
-            href={`/workouts/${inProgress.id}?exerciseId=${encodeURIComponent(
-              exercise.datasetId,
-            )}`}
-            className={cn(buttonVariants(), "h-12 w-full text-base")}
-          >
-            Log in “{inProgress.name}”
-          </Link>
-          <p className="text-muted-foreground text-center text-xs">
-            Opens your workout with this exercise filled in.
-          </p>
         </div>
-      )}
 
-      <ScheduleExerciseButton
-        datasetId={exercise.datasetId}
-        today={today}
-        defaultDate={tomorrow}
-      />
-
-      <Separator />
-
-      <footer className="flex flex-col gap-1 pb-2">
-        <p className="text-muted-foreground text-xs">
-          {/* Verbatim, licence-bearing: do not reword or truncate. */}
-          {exercise.attribution || GYM_VISUAL_ATTRIBUTION}
-        </p>
-        <p className="text-muted-foreground/80 text-xs">
-          Exercise data from the Exercises Dataset (MIT). Media © Gym visual and
-          not yet served by this build.
-        </p>
-      </footer>
-    </div>
+        <footer className="border-rule flex flex-col gap-1 border-t pt-4 pb-2">
+          <p className="text-muted-foreground text-[11px] leading-snug">
+            {/* Verbatim, licence-bearing: do not reword or truncate. */}
+            {exercise.attribution || GYM_VISUAL_ATTRIBUTION}
+          </p>
+          <p className="text-muted-foreground text-[11px] leading-snug">
+            Exercise data from the Exercises Dataset (MIT). Media © Gym visual
+            and not yet served by this build.
+          </p>
+        </footer>
+      </div>
+    </>
   );
 }

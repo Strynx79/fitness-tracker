@@ -1,46 +1,28 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
-
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 type EmptyStateProps = {
-  icon: LucideIcon;
-  title: string;
+  /** One 14px sentence, in the words of the trade. Never an instruction. */
   description: string;
+  /** The one route that fills this block. */
   action: { href: string; label: string };
 };
 
 /**
- * The dashboard's shared first-run / nothing-logged-yet block.
+ * The body of a block that has nothing in it yet.
  *
- * Deliberately a dashed outline rather than a `Card`: an empty card reads like
- * a card with missing data, while the dashed edge reads as a prompt. The CTA is
- * `h-11` so it stays a comfortable tap target on the gym floor.
+ * The frame and the heading belong to `DashboardPanel`; this only supplies the
+ * sentence and the link. That split is deliberate: an empty block is still the
+ * same block, so it keeps its heading and its surface instead of collapsing
+ * into a dashed prompt. No illustration, no icon, no sample numbers.
  */
-export function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
-}: EmptyStateProps) {
+export function EmptyState({ description, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-5 py-8 text-center">
-      <Icon aria-hidden className="text-muted-foreground size-6" />
-
-      <div className="flex flex-col gap-1">
-        <p className="text-base font-medium">{title}</p>
-        <p className="text-muted-foreground max-w-[32ch] text-sm text-balance">
-          {description}
-        </p>
-      </div>
+    <div className="flex flex-col items-start gap-1.5">
+      <p className="text-muted-foreground text-sm">{description}</p>
 
       <Link
         href={action.href}
-        className={cn(
-          buttonVariants({ variant: "outline", size: "lg" }),
-          "h-11 px-4",
-        )}
+        className="focus-visible:ring-ring/50 inline-flex h-11 items-center rounded-md text-sm font-medium underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         {action.label}
       </Link>

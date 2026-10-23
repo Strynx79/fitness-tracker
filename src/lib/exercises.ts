@@ -286,6 +286,11 @@ export type ExerciseFacetGroup = {
  * catalog-wide instead would let the rail say "Chest 163" above a header
  * reading "1–8 of 8", which costs more trust than a missing figure.
  *
+ * The text filter is the same token-AND `searchExercises` applies. It matters:
+ * the ranked path matches "incline dumbbell press" against a stored
+ * "dumbbell incline press", so an old substring filter here would report zero
+ * for every body part while the list below returned rows.
+ *
  * Two `groupBy` queries rather than one `findMany({ distinct })`: each scans a
  * single indexed column (`exercises_body_part_idx` / `exercises_equipment_idx`)
  * over 1,324 rows. If the catalog ever grows, promote this to a cached query
@@ -297,10 +302,15 @@ export async function getExerciseFacets(
   // The same normalization `searchExercises` applies, so the rail and the list
   // can never disagree about what the query means.
   const query = normalizeFilter(params.q, MAX_QUERY_CHARS);
-  const nameKey =
-    query === undefined
-      ? undefined
-      : { contains: escapeLikePattern(deriveExerciseKey(query)) };
+  const tokens = query === undefined ? [] : searchTokens(query);
+  const textWhere: Prisma.ExerciseWhereInput =
+    tokens.length === 0
+      ? {}
+      : {
+          AND: tokens.map((token) => ({
+            nameKey: { contains: escapeLikePattern(token) },
+          })),
+        };
 
   const bodyPart = normalizeFilter(params.bodyPart, 40);
   const equipment = normalizeFilter(params.equipment, 40);
@@ -310,7 +320,7 @@ export async function getExerciseFacets(
       by: ["bodyPart"],
       _count: { _all: true },
       where: {
-        ...(nameKey === undefined ? {} : { nameKey }),
+        ...textWhere,
         ...(equipment === undefined ? {} : { equipment: equipment.toLowerCase() }),
       },
       orderBy: { bodyPart: "asc" },
@@ -319,7 +329,7 @@ export async function getExerciseFacets(
       by: ["equipment"],
       _count: { _all: true },
       where: {
-        ...(nameKey === undefined ? {} : { nameKey }),
+        ...textWhere,
         ...(bodyPart === undefined ? {} : { bodyPart: bodyPart.toLowerCase() }),
       },
       orderBy: { equipment: "asc" },

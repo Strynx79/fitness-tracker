@@ -4,13 +4,6 @@ import { useActionState } from "react";
 
 import { createSession, type WorkoutActionState } from "@/app/workouts/actions";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,88 +42,99 @@ export function NewSessionForm() {
   const notesInvalid = Boolean(state.fieldErrors?.notes?.length);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Start a workout</CardTitle>
-        <CardDescription>
-          Name it and go. Sets are logged on the session screen.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={formAction} className="flex flex-col gap-5">
-          <Field data-invalid={nameInvalid}>
-            <FieldLabel htmlFor="session-name">Session name</FieldLabel>
-            <Input
-              id="session-name"
-              name="name"
-              type="text"
-              list="session-name-suggestions"
-              autoComplete="off"
-              enterKeyHint="next"
-              placeholder="Push"
-              defaultValue={values.name}
-              aria-invalid={nameInvalid}
-              className="h-12 text-base"
-            />
-            <datalist id="session-name-suggestions">
-              {SESSION_NAME_SUGGESTIONS.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <FieldError errors={toFieldErrors(state.fieldErrors?.name)} />
-          </Field>
+    <section
+      id="start-session"
+      aria-labelledby="start-session-heading"
+      className="bg-card scroll-mt-6 rounded-lg p-5 sm:p-6 lg:scroll-mt-20"
+    >
+      <h2
+        id="start-session-heading"
+        className="text-base leading-snug font-medium"
+      >
+        Start a workout
+      </h2>
+      <p className="text-muted-foreground mt-1 text-[13px] leading-snug">
+        Name it and go. Sets are logged on the session screen.
+      </p>
 
-          <Field data-invalid={notesInvalid}>
-            <FieldLabel htmlFor="session-notes">
-              Notes
-              <span className="text-muted-foreground font-normal">
-                (optional)
-              </span>
-            </FieldLabel>
-            <Textarea
-              id="session-notes"
-              name="notes"
-              rows={2}
-              placeholder="Sleep, energy, what you want to hit today."
-              defaultValue={values.notes}
-              aria-invalid={notesInvalid}
-              className="min-h-20 text-base"
-            />
-            <FieldError errors={toFieldErrors(state.fieldErrors?.notes)} />
-          </Field>
+      <form action={formAction} className="mt-4 flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor="session-name">Session name</FieldLabel>
+          <Input
+            id="session-name"
+            name="name"
+            type="text"
+            list="session-name-suggestions"
+            autoComplete="off"
+            enterKeyHint="next"
+            placeholder="Push"
+            defaultValue={values.name}
+            aria-invalid={nameInvalid}
+            className="bg-card h-10 rounded-md px-3 text-sm"
+          />
+          <datalist id="session-name-suggestions">
+            {SESSION_NAME_SUGGESTIONS.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <FieldError
+            errors={toFieldErrors(state.fieldErrors?.name)}
+            className="text-negative text-[13px]"
+          />
+        </Field>
 
-          <div className="flex flex-col gap-3">
-            <Button
-              type="submit"
-              size="lg"
-              disabled={pending}
-              className="h-12 w-full text-base"
-            >
-              {pending ? "Starting…" : "Start workout"}
-            </Button>
+        <Field>
+          <FieldLabel htmlFor="session-notes">
+            Notes
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
+          </FieldLabel>
+          <Textarea
+            id="session-notes"
+            name="notes"
+            rows={2}
+            placeholder="Sleep, energy, what you want to hit today."
+            defaultValue={values.notes}
+            aria-invalid={notesInvalid}
+            className="bg-card min-h-20 rounded-md px-3 text-sm"
+          />
+          <FieldError
+            errors={toFieldErrors(state.fieldErrors?.notes)}
+            className="text-negative text-[13px]"
+          />
+        </Field>
 
-            {/*
-              The single announcement for both outcomes, exactly like the other
-              slice forms: no toast, and nothing else in this form may become a
-              second live region.
-            */}
-            {state.status === "idle" || !state.message ? null : (
-              <p
-                role="status"
-                aria-live="polite"
-                className={cn(
-                  "text-sm",
-                  state.status === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground",
-                )}
-              >
-                {state.message}
-              </p>
+        {/*
+          The single announcement for both outcomes, exactly like the other
+          slice forms: no toast, and nothing else in this form may become a
+          second live region.
+        */}
+        {state.status === "idle" || !state.message ? null : (
+          <p
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "text-[13px] leading-snug",
+              state.status === "error"
+                ? "text-negative"
+                : "text-muted-foreground",
             )}
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          >
+            {state.message}
+          </p>
+        )}
+
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            disabled={pending}
+            className="h-10 rounded-md px-4 text-sm"
+          >
+            {pending ? "Starting…" : "Start workout"}
+          </Button>
+        </div>
+      </form>
+    </section>
   );
 }

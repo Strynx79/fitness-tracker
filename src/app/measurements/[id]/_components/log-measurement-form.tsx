@@ -5,14 +5,6 @@ import { useRouter } from "next/navigation";
 
 import { logMeasurement } from "@/app/measurements/actions";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 type LogMeasurementFormProps = {
@@ -22,12 +14,17 @@ type LogMeasurementFormProps = {
   today: string;
 };
 
+const LABEL = "text-sm font-medium";
+const FIELD = "flex flex-col gap-2";
+
 /**
  * Log (or correct) a reading for a given day.
  *
  * The date is editable and defaults to today: entering yesterday's waist at
  * breakfast is normal, and the action upserts on `(type, date)`, so re-submitting
- * the same day corrects it instead of duplicating it.
+ * the same day corrects it instead of duplicating it. Two 40px controls and one
+ * filled button — the panel fits a one-third column on desktop and a thumb on
+ * the phone.
  */
 export function LogMeasurementForm({
   typeId,
@@ -59,61 +56,67 @@ export function LogMeasurementForm({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Log a reading</CardTitle>
-        <CardDescription>
-          Re-entering a date you already logged corrects that day.
-        </CardDescription>
-      </CardHeader>
+    <section
+      id="entry"
+      aria-labelledby="log-reading-heading"
+      className="bg-card flex scroll-mt-6 flex-col rounded-lg p-5 sm:p-6 lg:scroll-mt-20"
+    >
+      <h2 id="log-reading-heading" className="text-base font-medium">
+        Log a reading
+      </h2>
+      <p className="text-muted-foreground mt-1 text-[13px]">
+        Re-entering a date you already logged corrects that day.
+      </p>
 
-      <CardContent>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel htmlFor="measurement-date">Date</FieldLabel>
-              <Input
-                id="measurement-date"
-                type="date"
-                value={date}
-                onChange={(event) => setDate(event.target.value)}
-                className="h-11 text-base"
-              />
-            </Field>
+      <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-4">
+        <div className={FIELD}>
+          <label htmlFor="measurement-date" className={LABEL}>
+            Date
+          </label>
+          <Input
+            id="measurement-date"
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="bg-card h-10 rounded-md text-base"
+          />
+        </div>
 
-            <Field>
-              <FieldLabel htmlFor="measurement-value">
-                Value ({unit})
-              </FieldLabel>
-              <Input
-                id="measurement-value"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                enterKeyHint="done"
-                placeholder="82.5"
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                className="h-11 text-base tabular-nums"
-              />
-            </Field>
+        <div className={FIELD}>
+          <label htmlFor="measurement-value" className={LABEL}>
+            Value ({unit})
+          </label>
+          <Input
+            id="measurement-value"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            enterKeyHint="done"
+            placeholder="82.5"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            className="bg-card h-10 rounded-md font-mono text-base tabular-nums"
+          />
+        </div>
+
+        <div className="flex flex-col gap-3 pt-1">
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              disabled={pending || date === "" || value.trim() === ""}
+              className="h-11 w-full rounded-md px-4 text-sm sm:w-auto"
+            >
+              {pending ? "Saving…" : "Save reading"}
+            </Button>
           </div>
 
           {error === null ? null : (
-            <p role="alert" className="text-destructive text-sm">
+            <p role="alert" className="text-negative text-[13px]">
               {error}
             </p>
           )}
-
-          <Button
-            type="submit"
-            disabled={pending || date === "" || value.trim() === ""}
-            className="h-11 w-full"
-          >
-            {pending ? "Saving…" : "Save reading"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        </div>
+      </form>
+    </section>
   );
 }

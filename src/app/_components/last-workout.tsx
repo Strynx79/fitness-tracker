@@ -1,21 +1,14 @@
 import Link from "next/link";
-import { Dumbbell } from "lucide-react";
 
+import { DashboardPanel } from "@/app/_components/dashboard-panel";
 import { EmptyState } from "@/app/_components/empty-state";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { addDays, isoDateInZone, todayIso } from "@/lib/date";
 import { getLastCompletedWorkout } from "@/lib/workouts";
 import { formatShortDate } from "@/lib/workout-format";
 
 /**
- * Volume is a float (`weightKg * reps` summed), but the card is a headline:
+ * Volume is a float (`weightKg * reps` summed), but the panel is a headline:
  * round it, then group thousands so "3113" reads as "3,113".
  */
 const VOLUME = new Intl.NumberFormat("en-US", {
@@ -37,93 +30,68 @@ function describeWhen(iso: string, timeZone: string): string {
   return formatShortDate(iso, timeZone);
 }
 
+/**
+ * The last finished session, as a summary rather than a history.
+ *
+ * The session name is the one link into the detail screen; "All workouts" in
+ * the header is the route back to the list. Volume is the block's figure —
+ * duration and sets are the supporting columns under the rule.
+ */
 export async function LastWorkout() {
   const user = await getCurrentUser();
   const workout = await getLastCompletedWorkout(user.id);
 
   if (workout === null) {
     return (
-      <EmptyState
-        icon={Dumbbell}
-        title="No workouts yet"
-        description="Log a session and the last one you finished will stay on this screen."
-        action={{ href: "/workouts", label: "Start a workout" }}
-      />
+      <DashboardPanel title="Last workout" headingId="last-workout-heading">
+        <EmptyState
+          description="No workouts yet."
+          action={{ href: "/workouts", label: "Start a workout" }}
+        />
+      </DashboardPanel>
     );
   }
 
+  const exerciseList = workout.exerciseNames.join(" · ");
+
   return (
-    <section
-      aria-labelledby="last-workout-heading"
-      className="flex flex-col gap-3"
+    <DashboardPanel
+      title="Last workout"
+      headingId="last-workout-heading"
+      action={{ href: "/workouts", label: "All workouts" }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <h2
-          id="last-workout-heading"
-          className="text-base font-semibold tracking-tight"
-        >
-          Last workout
-        </h2>
-
-        <Link
-          href="/workouts"
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex h-11 items-center rounded-lg px-2 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:outline-none"
-        >
-          All workouts
-        </Link>
-      </div>
-
       <Link
         href={`/workouts/${workout.id}`}
-        className="rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="focus-visible:ring-ring/50 -mt-2 flex min-h-11 w-fit max-w-full flex-col justify-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
       >
-        <Card className="transition-colors hover:bg-muted/40">
-          <CardHeader>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <CardTitle className="text-lg">{workout.name}</CardTitle>
-              <time
-                dateTime={workout.completedAtIso}
-                className="text-muted-foreground text-sm"
-              >
-                {describeWhen(workout.completedAtIso, user.timezone)}
-              </time>
-            </div>
-          </CardHeader>
-
-          <CardContent className="flex flex-col gap-3">
-            <dl className="grid grid-cols-3 gap-2">
-              <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <dt className="text-muted-foreground text-[0.7rem]">Duration</dt>
-                <dd className="font-semibold tabular-nums">
-                  {workout.durationMinutes} min
-                </dd>
-              </div>
-              <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <dt className="text-muted-foreground text-[0.7rem]">Sets</dt>
-                <dd className="font-semibold tabular-nums">
-                  {workout.setCount} sets
-                </dd>
-              </div>
-              <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <dt className="text-muted-foreground text-[0.7rem]">Volume</dt>
-                <dd className="font-semibold tabular-nums">
-                  {VOLUME.format(Math.round(workout.totalVolumeKg))} kg
-                </dd>
-              </div>
-            </dl>
-
-            <ul className="flex flex-wrap gap-1.5">
-              {workout.exerciseNames.map((name, index) => (
-                <li key={`${name}-${index}`} className="max-w-full">
-                  <Badge variant="secondary" className="max-w-[16rem]">
-                    <span className="min-w-0 truncate">{name}</span>
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <span className="text-sm font-medium">{workout.name}</span>
+        <time
+          dateTime={workout.completedAtIso}
+          className="text-muted-foreground mt-0.5 font-mono text-[13px] tabular-nums"
+        >
+          {describeWhen(workout.completedAtIso, user.timezone)}
+        </time>
       </Link>
-    </section>
+
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <p className="font-mono text-2xl leading-none font-medium tabular-nums">
+          {VOLUME.format(Math.round(workout.totalVolumeKg))}
+        </p>
+        <span className="text-muted-foreground text-xs">kg volume</span>
+      </div>
+
+      {exerciseList === "" ? null : (
+        <p className="text-muted-foreground mt-2 truncate text-[13px]">
+          {exerciseList}
+        </p>
+      )}
+
+      <div className="border-rule text-muted-foreground mt-3 flex items-baseline justify-between gap-3 border-t pt-3 text-[13px]">
+        <span className="font-mono tabular-nums">
+          {workout.durationMinutes} min
+        </span>
+        <span className="font-mono tabular-nums">{workout.setCount} sets</span>
+      </div>
+    </DashboardPanel>
   );
 }

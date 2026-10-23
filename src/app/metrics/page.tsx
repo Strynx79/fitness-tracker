@@ -1,31 +1,33 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Suspense } from "react";
-import { Ruler } from "lucide-react";
 
+import { PageShell, ScreenHeader } from "@/app/_components/page-shell";
 import {
   DailyMetricForm,
   type DailyMetricFormValues,
 } from "@/app/metrics/_components/daily-metric-form";
 import { MetricsDateNav } from "@/app/metrics/_components/metrics-date-nav";
 import { MetricsHistoryTable } from "@/app/metrics/_components/metrics-history-table";
+import { MetricsKpis } from "@/app/metrics/_components/metrics-kpis";
 import { MetricsSkeleton } from "@/app/metrics/_components/metrics-skeleton";
 import { WeightTrendChart } from "@/app/metrics/_components/weight-trend-chart";
-import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import {
   buildWeightSeries,
   getDailyMetric,
   getDailyMetricHistory,
+  getWeightSummary,
 } from "@/lib/daily-metrics";
-import { addDays, isIsoDate, todayIso } from "@/lib/date";
+import { addDays, isIsoDate, parseIsoDate, todayIso } from "@/lib/date";
 
 export const metadata: Metadata = {
-  title: "Daily metrics",
+  title: "Metrics",
 };
 
 /** Window length for the trend + history, in days (inclusive of today). */
 const HISTORY_DAYS = 30;
+
+const MS_PER_DAY = 86_400_000;
 
 /** An untouched input submits "", which the schema reads as `null` (unknown). */
 function toInputValue(value: number | null): string {
@@ -49,33 +51,37 @@ function resolveSelectedDate(
     : fallback;
 }
 
+/**
+ * The header's fact about the data, not about the interface.
+ *
+ * The newest weigh-in can be much older than the 30-day window, which is
+ * exactly why the gap is stated in words here rather than implied by the chart.
+ */
+function describeLastWeighIn(lastDate: string | null, today: string): string {
+  if (lastDate === null) return "No weigh-in yet.";
+
+  const days = Math.round(
+    (parseIsoDate(today).getTime() - parseIsoDate(lastDate).getTime()) / MS_PER_DAY,
+  );
+
+  if (days <= 0) return "Last weigh-in today.";
+  if (days === 1) return "Last weigh-in yesterday.";
+  return `Last weigh-in ${days} days ago.`;
+}
+
 export default function MetricsPage({ searchParams }: PageProps<"/metrics">) {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6">
-      {/* Static shell: renders immediately while the day's data streams in. */}
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">Daily metrics</h1>
-        <p className="text-muted-foreground text-sm">
-          Weight, calories and protein for one day, plus a {HISTORY_DAYS}-day weight
-          trend.
-        </p>
-      </header>
-
-      <Link
-        href="/measurements"
-        className="hover:bg-muted/50 focus-visible:ring-ring/50 flex min-h-14 items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none"
-      >
-        <span className="flex items-center gap-2">
-          <Ruler aria-hidden className="size-4" />
-          <span className="font-medium">Body measurements</span>
-        </span>
-        <span className="text-muted-foreground text-xs">Waist, chest, arms…</span>
-      </Link>
-
+    <PageShell width="wide">
+      {/*
+        The header's description and its date control both depend on request
+        data (the newest weigh-in and the selected day), so the whole screen —
+        header included — sits behind one boundary. Splitting it would mean
+        reading the same summary twice.
+      */}
       <Suspense fallback={<MetricsSkeleton />}>
         <MetricsContent searchParams={searchParams} />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }
 
@@ -99,10 +105,12 @@ async function MetricsContent({
   const windowEnd = today;
   const windowStart = addDays(windowEnd, -(HISTORY_DAYS - 1));
 
-  // One history read feeds both the chart and the table.
-  const [history, metric] = await Promise.all([
+  // One history read feeds both the chart and the table; the summary answers
+  // the header and the KPI strip.
+  const [history, metric, summary] = await Promise.all([
     getDailyMetricHistory(user.id, windowStart, windowEnd),
     getDailyMetric(user.id, selectedDate),
+    getWeightSummary(user.id),
   ]);
 
   const series = buildWeightSeries(history, windowStart, windowEnd);
@@ -115,27 +123,47 @@ async function MetricsContent({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardContent>
-          <MetricsDateNav selectedDate={selectedDate} today={today} />
-        </CardContent>
-      </Card>
-
-      {/*
-        Keyed by date: the inputs are uncontrolled, so `defaultValue` only
-        applies on mount. Without the key, navigating to another day would keep
-        the previous day's values in the form.
-      */}
-      <DailyMetricForm
-        key={selectedDate}
-        selectedDate={selectedDate}
-        defaultValues={defaultValues}
+    <>
+      <ScreenHeader
+        title="Metrics"
+        description={describeLastWeighIn(summary.latest?.date ?? null, today)}
+        action={<MetricsDateNav selectedDate={selectedDate} today={today} />}
       />
 
-      <WeightTrendChart data={series} days={HISTORY_DAYS} />
+      <MetricsKpis
+        currentKg={summary.latest?.weightKg ?? null}
+        change7dKg={summary.change7dKg}
+        deltaKg={summary.deltaKg}
+        // The header-to-first-block rhythm on data screens is 60px; PageShell
+        // already supplies 24px of it.
+        className="mt-9"
+      />
 
-      <MetricsHistoryTable rows={history} selectedDate={selectedDate} />
-    </div>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <WeightTrendChart
+          data={series}
+          days={HISTORY_DAYS}
+          className="lg:col-span-2"
+        />
+
+        {/*
+          Keyed by date: the inputs are uncontrolled, so `defaultValue` only
+          applies on mount. Without the key, navigating to another day would keep
+          the previous day's values in the form.
+        */}
+        <DailyMetricForm
+          key={selectedDate}
+          selectedDate={selectedDate}
+          today={today}
+          defaultValues={defaultValues}
+        />
+      </div>
+
+      <MetricsHistoryTable
+        rows={history}
+        selectedDate={selectedDate}
+        today={today}
+      />
+    </>
   );
 }

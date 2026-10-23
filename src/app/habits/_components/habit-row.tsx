@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Archive, Flame } from "lucide-react";
 import { toast } from "sonner";
 
 import { archiveHabit } from "@/app/habits/actions";
+import { useHabitDay } from "@/app/habits/_components/habit-day";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -17,67 +17,59 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { parseIsoDate } from "@/lib/date";
 import type { HabitWithStats } from "@/lib/habits";
 import { cn } from "@/lib/utils";
 
 type HabitRowProps = {
   habit: HabitWithStats;
-  /**
-   * The value to render, which is the optimistic one while a tap is in flight.
-   * The parent owns it so every row's checkbox moves on the same tick.
-   */
-  checked: boolean;
-  onToggle: (habitId: string, completed: boolean) => void;
 };
 
-/** "Oct 15" for the dot tooltips. UTC for the same reason as the page header. */
-const DAY_LABEL = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
-export function HabitRow({ habit, checked, onToggle }: HabitRowProps) {
+/**
+ * One ruled row of the checklist.
+ *
+ * The checkbox sits at the leading edge with a 44px target, so a thumb aims
+ * for the left margin and never has to find a 20px square. The name and its
+ * single secondary line share the middle; archive is the only trailing action.
+ * Taps between sets are the reason for the sizes, not decoration.
+ */
+export function HabitRow({ habit }: HabitRowProps) {
+  const { checkedFor, onToggle } = useHabitDay();
+  const checked = checkedFor(habit);
   const checkboxId = `habit-check-${habit.id}`;
 
   return (
-    <li className="flex items-start gap-3 px-4 py-3.5">
+    <li className="flex items-center pr-2 pl-2">
       {/*
-        `id` here is what Base UI puts on the hidden <input>, so the <label>
-        below toggles it natively — the whole name/description block is a tap
-        target, not just the 20px box. The checkbox's own `after:-inset-*`
-        padding widens the touch area further.
+        The box's own `after:` pseudo-element widens the hit area to 44×44, so
+        the visible square can stay 20px without being the target. The gutter
+        is layout only — a second label around the box would race the input's
+        native label activation.
       */}
-      <Checkbox
-        id={checkboxId}
-        checked={checked}
-        onCheckedChange={(next) => onToggle(habit.id, next)}
-        className="mt-1 size-5"
-      />
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <label
-          htmlFor={checkboxId}
-          className="flex cursor-pointer flex-col gap-0.5"
-        >
-          <span
-            className={cn(
-              "text-base leading-snug font-medium",
-              checked && "text-muted-foreground line-through",
-            )}
-          >
-            {habit.name}
-          </span>
-          {habit.description === null ? null : (
-            <span className="text-muted-foreground text-sm leading-snug">
-              {habit.description}
-            </span>
-          )}
-        </label>
-
-        <HabitStats habit={habit} />
+      <div className="flex w-11 shrink-0 items-center justify-center self-stretch">
+        <Checkbox
+          id={checkboxId}
+          checked={checked}
+          onCheckedChange={(next) => onToggle(habit.id, next)}
+          className="size-5 after:-inset-y-3 data-checked:border-data data-checked:bg-data"
+        />
       </div>
+
+      <label
+        htmlFor={checkboxId}
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 py-2"
+      >
+        <span
+          className={cn(
+            "truncate text-sm leading-snug font-medium",
+            checked && "text-muted-foreground line-through",
+          )}
+        >
+          {habit.name}
+        </span>
+        <span className="text-muted-foreground truncate text-[13px] leading-snug">
+          <HabitDetail habit={habit} />
+        </span>
+      </label>
 
       <ArchiveHabitButton habit={habit} />
     </li>
@@ -85,73 +77,48 @@ export function HabitRow({ habit, checked, onToggle }: HabitRowProps) {
 }
 
 /**
- * Streak and 7-day completion.
+ * The one supporting line: the streak first, then either the habit's own note
+ * or the 7-day rate when there is no note.
  *
- * The pixels are `aria-hidden` and summarised once in prose below them: read
- * literally the strip is "12 100% ○●○●●●", which is noise for a screen reader,
- * and the sr-only line bundles the paired facts (dot dates included) without
- * the row announcing them twice.
+ * Both numbers are mono because they are figures; the words around them stay in
+ * the UI face. A zero streak says so instead of printing a celebratory zero,
+ * and a capped streak reads "365+ day streak". The note follows the stat on the
+ * same line, so a long note truncates instead of pushing the streak out of view.
  */
-function HabitStats({ habit }: { habit: HabitWithStats }) {
-  const hasStreak = habit.streak > 0;
-  const streakLabel = habit.streakCapped ? "365+" : String(habit.streak);
-  const todayIndex = habit.last7Days.length - 1;
+function HabitDetail({ habit }: { habit: HabitWithStats }) {
+  const rate = (
+    <span className="font-mono tabular-nums">{habit.completionRate7d}%</span>
+  );
 
-  const summary = [
-    hasStreak ? `${streakLabel} day streak` : "No current streak",
-    `${habit.completionRate7d}% of the last 7 days`,
-  ].join(", ");
+  const streak =
+    habit.streak === 0 ? (
+      <>No streak yet</>
+    ) : habit.streakCapped ? (
+      <>
+        <span className="font-mono tabular-nums">365+</span> day streak
+      </>
+    ) : (
+      <>
+        <span className="font-mono tabular-nums">{habit.streak}</span>-day
+        streak
+      </>
+    );
 
   return (
-    <div className="flex items-center gap-3">
-      <span aria-hidden className="flex items-center gap-3 text-xs">
-        {/*
-          A zero streak is greyed rather than celebrated: an orange flame next
-          to "0" reads as a trophy for having done nothing.
-        */}
-        <span
-          className={cn(
-            "inline-flex items-center gap-1",
-            hasStreak ? "font-medium" : "text-muted-foreground/60",
-          )}
-        >
-          <Flame className={cn("size-3.5", hasStreak && "text-amber-500")} />
-          <span className="tabular-nums">{streakLabel}</span>
-        </span>
-
-        <span className="text-muted-foreground inline-flex items-center gap-1.5">
-          <span className="tabular-nums">{habit.completionRate7d}%</span>
-          <span className="flex items-center gap-0.5">
-            {habit.last7Days.map((day, index) => (
-              <span
-                key={day.date}
-                title={`${DAY_LABEL.format(parseIsoDate(day.date))}${
-                  index === todayIndex ? " (today)" : ""
-                } — ${day.completed ? "completed" : "not completed"}`}
-                className={cn(
-                  "size-2 rounded-full",
-                  day.completed
-                    ? "bg-primary"
-                    : "border border-muted-foreground/40",
-                  index === todayIndex && "ring-2 ring-primary/25",
-                )}
-              />
-            ))}
-          </span>
-        </span>
-      </span>
-
-      <span className="sr-only">{summary}</span>
-    </div>
+    <>
+      {streak} ·{" "}
+      {habit.description === null ? <>{rate} this week</> : habit.description}
+    </>
   );
 }
 
 /**
  * Soft delete, behind a confirmation.
  *
- * Deliberately the trailing element of the row with its own 44px target: the
- * checkbox sits at the leading edge and the label fills everything between, so
- * a thumb aiming for "done" has to travel to hit this.
+ * A quiet text action rather than an icon slot: the row's one trailing action
+ * should be readable at a glance, and the 44px height keeps it reachable. Its
+ * distance from the checkbox matters — a thumb aiming for "done" should not
+ * land on "archive".
  */
 function ArchiveHabitButton({ habit }: { habit: HabitWithStats }) {
   const [open, setOpen] = useState(false);
@@ -187,15 +154,14 @@ function ArchiveHabitButton({ habit }: { habit: HabitWithStats }) {
         render={
           <Button
             variant="ghost"
-            size="icon"
-            className="text-muted-foreground/60 hover:text-destructive mt-0.5 -mr-2 size-11 shrink-0"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 h-11 shrink-0 rounded-md px-2 text-[13px] font-normal hover:bg-transparent"
           />
         }
       >
-        <Archive aria-hidden />
+        Archive
       </DialogTrigger>
 
-      <DialogContent>
+      <DialogContent className="rounded-lg">
         <DialogHeader>
           <DialogTitle>{`Archive "${habit.name}"?`}</DialogTitle>
           <DialogDescription>
@@ -206,27 +172,21 @@ function ArchiveHabitButton({ habit }: { habit: HabitWithStats }) {
         </DialogHeader>
 
         {error === null ? null : (
-          <p role="alert" className="text-destructive text-sm">
+          <p role="alert" className="text-negative text-[13px]">
             {error}
           </p>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="bg-card">
           <DialogClose
             render={
-              <Button
-                variant="ghost"
-                size="lg"
-                className="h-11"
-                disabled={pending}
-              />
+              <Button variant="ghost" className="h-11" disabled={pending} />
             }
           >
             Cancel
           </DialogClose>
           <Button
             variant="destructive"
-            size="lg"
             className="h-11"
             disabled={pending}
             onClick={handleArchive}

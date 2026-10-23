@@ -10,8 +10,6 @@ import { cn } from "@/lib/utils";
 
 type StartRoutineButtonProps = {
   routineId: string;
-  /** "lg" on the routine page, compact in the Today card. */
-  size?: "default" | "lg";
   className?: string;
 };
 
@@ -19,11 +17,11 @@ type StartRoutineButtonProps = {
  * Start a routine now.
  *
  * The action creates the session and copies the routine's exercises in, then we
- * navigate to it — logging is the only useful next step.
+ * navigate to it — logging is the only useful next step. This is the routine
+ * detail screen's single filled primary.
  */
 export function StartRoutineButton({
   routineId,
-  size = "default",
   className,
 }: StartRoutineButtonProps) {
   const router = useRouter();
@@ -48,13 +46,12 @@ export function StartRoutineButton({
   return (
     <Button
       type="button"
-      size={size}
       disabled={pending}
       onClick={handleStart}
-      className={cn(size === "lg" && "h-12 w-full text-base", className)}
+      className={cn("h-10 rounded-md px-4 text-sm", className)}
     >
       <Play aria-hidden className="size-4" />
-      {pending ? "Starting…" : "Start"}
+      {pending ? "Starting…" : "Start workout"}
     </Button>
   );
 }

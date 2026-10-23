@@ -27,6 +27,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-rule: var(--rule);
+  --color-data: var(--data);
+  --color-data-soft: var(--data-soft);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -73,9 +77,18 @@
   --border: oklch(0.918 0 0);
   --rule: oklch(0.925 0.004 95);
   --input: oklch(0.86 0 0);
-  --ring: oklch(0.55 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
+  --ring: oklch(0.55 0.15 264);
+
+  /*
+   * The one hue. It is data, not chrome: the chart series, today's mark, the
+   * figure that answers the screen's question. Deep royal blue, 5.9:1 on white.
+   */
+  --data: oklch(0.44 0.19 264);
+  --data-soft: oklch(0.44 0.19 264 / 12%);
+  --positive: oklch(0.51 0.12 155);
+  --negative: oklch(0.5 0.19 27);
+  --chart-1: var(--data);
+  --chart-2: oklch(0.62 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);

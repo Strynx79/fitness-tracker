@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { CalendarPlus } from "lucide-react";
 
 import { scheduleExercise } from "@/app/workouts/actions";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -24,7 +23,7 @@ type ScheduleExerciseButtonProps = {
   datasetId: string;
   /** Today in the user's timezone — the earliest date that makes sense. */
   today: string;
-  /** Tomorrow in the user's timezone; the default pick. */
+  /** The date the picker opens on; the caller decides which day that is. */
   defaultDate: string;
 };
 
@@ -79,11 +78,14 @@ export function ScheduleExerciseButton({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button variant="outline" className="h-12 w-full gap-2 text-base" />
+          <Button
+            // The screen's one filled primary, already in the header's action
+            // slot. 44px so it survives a tap between sets.
+            className="h-11 rounded-md px-4 text-sm"
+          />
         }
       >
-        <CalendarPlus aria-hidden className="size-5" />
-        Schedule for later
+        Schedule for today
       </DialogTrigger>
 
       <DialogContent>

@@ -3,19 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import {
-  discardSession,
-  finishSession,
-} from "@/app/workouts/actions";
-import { Badge } from "@/components/ui/badge";
+import { discardSession, finishSession } from "@/app/workouts/actions";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -27,76 +16,19 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-type SessionHeaderProps = {
+type SessionActionProps = {
   sessionId: string;
-  name: string;
-  notes: string | null;
-  /** Already formatted server-side in the user's timezone. */
-  startedAtLabel: string;
-  /** Calendar date label when the workout was planned ahead; `null` if not. */
-  scheduledForLabel: string | null;
-  completedAtLabel: string | null;
-  isCompleted: boolean;
 };
 
 /**
- * Session identity plus the two ways to close it.
+ * The session's two terminal actions.
  *
- * Finish and discard are both terminal, so both sit behind a Dialog. Errors are
- * rendered inside the modal rather than as a toast: a toast paints behind the
- * dialog popup, where the user cannot read it.
+ * Finish is the screen's one filled primary and lives in the header; discard is
+ * a quiet text action at the bottom of the page. Both stay behind a
+ * confirmation, and errors render inside the modal rather than as a toast: a
+ * toast paints behind the dialog popup, where the user cannot read it.
  */
-export function SessionHeader({
-  sessionId,
-  name,
-  notes,
-  startedAtLabel,
-  scheduledForLabel,
-  completedAtLabel,
-  isCompleted,
-}: SessionHeaderProps) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="font-heading text-xl leading-tight font-semibold">
-              {name}
-            </h1>
-            <CardDescription>
-              {scheduledForLabel === null ? (
-                <span>Started {startedAtLabel}</span>
-              ) : (
-                <span>Scheduled for {scheduledForLabel}</span>
-              )}
-              {completedAtLabel === null ? null : (
-                <span> · Finished {completedAtLabel}</span>
-              )}
-            </CardDescription>
-          </div>
-          <Badge variant={isCompleted ? "secondary" : "default"}>
-            {isCompleted ? "Completed" : "In progress"}
-          </Badge>
-        </div>
-      </CardHeader>
-
-      {notes === null ? null : (
-        <CardContent>
-          <p className="text-sm whitespace-pre-line">{notes}</p>
-        </CardContent>
-      )}
-
-      {isCompleted ? null : (
-        <CardFooter className="flex-col gap-2 sm:flex-row">
-          <FinishSessionButton sessionId={sessionId} />
-          <DiscardSessionButton sessionId={sessionId} />
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
-
-function FinishSessionButton({ sessionId }: { sessionId: string }) {
+export function FinishSessionButton({ sessionId }: SessionActionProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -112,7 +44,7 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
 
       if (result.ok) {
         // `finishSession` revalidates this route, so the header re-renders as
-        // completed and the action buttons disappear on their own.
+        // completed and the action disappears on its own.
         setOpen(false);
         return;
       }
@@ -125,11 +57,11 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button size="lg" className="h-11 w-full sm:flex-1" />
+          <Button className="h-10 rounded-md px-4 text-sm">
+            Finish session
+          </Button>
         }
-      >
-        Finish session
-      </DialogTrigger>
+      />
 
       <DialogContent>
         <DialogHeader>
@@ -141,7 +73,7 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
         </DialogHeader>
 
         {error === null ? null : (
-          <p role="alert" className="text-destructive text-sm">
+          <p role="alert" className="text-negative text-[13px]">
             {error}
           </p>
         )}
@@ -152,7 +84,7 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
               <Button
                 variant="ghost"
                 size="lg"
-                className="h-11"
+                className="h-10"
                 disabled={pending}
               />
             }
@@ -161,7 +93,7 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
           </DialogClose>
           <Button
             size="lg"
-            className="h-11"
+            className="h-10"
             disabled={pending}
             onClick={handleFinish}
           >
@@ -173,7 +105,7 @@ function FinishSessionButton({ sessionId }: { sessionId: string }) {
   );
 }
 
-function DiscardSessionButton({ sessionId }: { sessionId: string }) {
+export function DiscardSessionButton({ sessionId }: SessionActionProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -203,13 +135,12 @@ function DiscardSessionButton({ sessionId }: { sessionId: string }) {
       <DialogTrigger
         render={
           <Button
-            variant="outline"
-            size="lg"
-            className="text-destructive h-11 w-full sm:flex-1"
+            variant="ghost"
+            className="text-negative hover:text-negative h-10 rounded-md px-2 text-sm"
           />
         }
       >
-        Discard
+        Discard session
       </DialogTrigger>
 
       <DialogContent>
@@ -222,7 +153,7 @@ function DiscardSessionButton({ sessionId }: { sessionId: string }) {
         </DialogHeader>
 
         {error === null ? null : (
-          <p role="alert" className="text-destructive text-sm">
+          <p role="alert" className="text-negative text-[13px]">
             {error}
           </p>
         )}
@@ -233,7 +164,7 @@ function DiscardSessionButton({ sessionId }: { sessionId: string }) {
               <Button
                 variant="ghost"
                 size="lg"
-                className="h-11"
+                className="h-10"
                 disabled={pending}
               />
             }
@@ -243,7 +174,7 @@ function DiscardSessionButton({ sessionId }: { sessionId: string }) {
           <Button
             variant="destructive"
             size="lg"
-            className="h-11"
+            className="h-10"
             disabled={pending}
             onClick={handleDiscard}
           >

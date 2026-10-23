@@ -1,86 +1,82 @@
 import Link from "next/link";
-import { CalendarCheck, ChevronRight } from "lucide-react";
 
-import { StartRoutineButton } from "@/app/routines/_components/start-routine-button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import type { RoutineSummary } from "@/lib/routines";
-import { WEEKDAYS } from "@/lib/weekdays";
+import { cn } from "@/lib/utils";
+import { formatCalendarDate } from "@/lib/workout-format";
 
 type TodayPlanProps = {
-  /** Routines whose schedule includes today's weekday. */
-  routines: RoutineSummary[];
-  /** 0 = Sunday … 6 = Saturday, in the user's timezone. */
-  weekday: number;
+  /** The session under way, or one planned for today; `null` when there is neither. */
+  session: TodaySession | null;
+  /** True when the session is already being logged, false when it is still planned. */
+  isInProgress: boolean;
+  className?: string;
+};
+
+/** The few fields the panel needs; both an in-progress read and a list row fit. */
+export type TodaySession = {
+  id: string;
+  name: string;
+  exerciseNames: string[];
+  scheduledForIso: string | null;
 };
 
 /**
- * "Today's plan" — the routines scheduled for today.
+ * The screen's first answer: what is on the bar today.
  *
- * Starting one is the primary action; doing something else is still one tap
- * away via the normal "start a workout" form below. When nothing is scheduled
- * this renders a link to set routines up instead of an empty card.
+ * One panel, never a grid of cards. When a session is under way it leads with
+ * "Continue" because resuming beats starting; a session merely planned for
+ * today opens instead. With neither, the block keeps its heading and offers the
+ * one route that fills it.
  */
-export function TodayPlan({ routines, weekday }: TodayPlanProps) {
-  const dayLabel = WEEKDAYS.find((day) => day.index === weekday)?.label ?? "today";
-
-  if (routines.length === 0) {
-    return (
-      <Link
-        href="/routines"
-        className="hover:bg-muted/50 focus-visible:ring-ring/50 flex min-h-14 items-center justify-between gap-2 rounded-xl border border-dashed px-4 py-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none"
-      >
-        <span className="flex flex-col gap-0.5">
-          <span className="font-medium">Nothing planned for {dayLabel}</span>
-          <span className="text-muted-foreground text-xs">
-            Set up routines to get a Push / Pull / Legs schedule.
-          </span>
-        </span>
-        <ChevronRight aria-hidden className="text-muted-foreground size-4 shrink-0" />
-      </Link>
-    );
-  }
-
+export function TodayPlan({ session, isInProgress, className }: TodayPlanProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CalendarCheck aria-hidden className="size-4" />
-          Today · {dayLabel}
-        </CardTitle>
-        <CardDescription>
-          Start the plan, or ignore it and log something else below.
-        </CardDescription>
-      </CardHeader>
+    <section
+      aria-labelledby="today-plan-heading"
+      className={cn("bg-card rounded-lg p-5 sm:p-6", className)}
+    >
+      <h2 id="today-plan-heading" className="text-base leading-snug font-medium">
+        Today&apos;s plan
+      </h2>
 
-      <CardContent className="flex flex-col gap-2">
-        {routines.map((routine) => (
-          <div
-            key={routine.id}
-            className="flex items-center gap-2 rounded-lg border p-3"
+      {session === null ? (
+        <div className="mt-3 flex flex-col items-start gap-1.5">
+          <p className="text-muted-foreground text-sm">
+            Nothing scheduled for today.
+          </p>
+          <Link
+            href="#start-session"
+            className="focus-visible:ring-ring/50 inline-flex h-11 items-center rounded-md text-sm font-medium underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
           >
-            <Link
-              href={`/routines/${routine.id}`}
-              className="hover:text-primary min-w-0 flex-1 truncate text-base font-medium underline-offset-4 hover:underline"
-            >
-              {routine.name}
-            </Link>
-            <StartRoutineButton routineId={routine.id} className="shrink-0" />
-          </div>
-        ))}
+            Start a workout
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-medium">{session.name}</p>
 
-        <Link
-          href="/routines"
-          className="text-muted-foreground hover:text-foreground mt-1 text-xs underline-offset-4 hover:underline"
-        >
-          Edit routines
-        </Link>
-      </CardContent>
-    </Card>
+            <p className="text-muted-foreground mt-0.5 text-xs">
+              {isInProgress
+                ? "In progress"
+                : session.scheduledForIso === null
+                  ? "Planned"
+                  : formatCalendarDate(session.scheduledForIso)}
+            </p>
+
+            <p className="text-muted-foreground mt-2 truncate text-sm">
+              {session.exerciseNames.length === 0
+                ? "No exercises added yet."
+                : session.exerciseNames.join(" · ")}
+            </p>
+          </div>
+
+          <Link
+            href={`/workouts/${session.id}`}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -my-2 inline-flex h-11 shrink-0 items-center rounded-md px-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          >
+            {isInProgress ? "Continue" : "Open"}
+          </Link>
+        </div>
+      )}
+    </section>
   );
 }

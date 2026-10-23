@@ -358,7 +358,16 @@ export async function getWorkoutSessionList(
       // Planned workouts live in the "Upcoming" list, not in history. Without
       // this a session scheduled for Saturday would sit at the top of "History"
       // looking like something that already happened.
-      NOT: { scheduledFor: { gt: parseIsoDate(today) } },
+      //
+      // Written as an explicit OR rather than `NOT: { scheduledFor: { gt } }`:
+      // in SQL, `NOT (scheduled_for > $1)` is NULL — and therefore not matched —
+      // for every ad-hoc session, whose `scheduledFor` is NULL. The negation
+      // reads as "everything not in the future" but silently drops the normal
+      // case of a workout started from scratch.
+      OR: [
+        { scheduledFor: null },
+        { scheduledFor: { lte: parseIsoDate(today) } },
+      ],
     },
     orderBy: { startedAt: "desc" },
     select: {

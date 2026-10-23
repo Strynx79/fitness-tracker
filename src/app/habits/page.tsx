@@ -1,99 +1,63 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
-import { HabitChecklist } from "@/app/habits/_components/habit-checklist";
+import { PageShell, ScreenHeader } from "@/app/_components/page-shell";
+import {
+  HabitCount,
+  HabitDayProvider,
+} from "@/app/habits/_components/habit-day";
+import { HabitSheet } from "@/app/habits/_components/habit-checklist";
 import { HabitsSkeleton } from "@/app/habits/_components/habits-skeleton";
 import { NewHabitForm } from "@/app/habits/_components/new-habit-form";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import { parseIsoDate, todayIso } from "@/lib/date";
+import { todayIso } from "@/lib/date";
 import { getHabitChecklist } from "@/lib/habits";
 
 export const metadata: Metadata = {
-  title: "Today's habits",
+  title: "Habits",
 };
 
 /**
- * "Sun, Oct 19"-style label for a `YYYY-MM-DD` calendar day.
+ * The checklist screen.
  *
- * `timeZone: "UTC"` is load-bearing: `parseIsoDate` pins a date-only value at
- * UTC midnight, and `toLocaleDateString()` would re-read it in whatever zone
- * the runtime happens to be in — printing the previous day for every zone
- * behind UTC.
+ * Everything below the 880px shell depends on the user's timezone and today's
+ * logs, so the whole content streams through one Suspense boundary. The
+ * provider is a client island *inside* that boundary: it holds the optimistic
+ * ticks, which lets the header's "3 of 5" and the boxes move together instead
+ * of the count lagging a round trip behind.
+ *
+ * The provider renders no DOM of its own, so the header, the sheet and the add
+ * form stay direct children of `PageShell` and keep its 24px rhythm.
  */
-const FRIENDLY_DATE = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
-function formatFriendlyDate(isoDate: string): string {
-  return FRIENDLY_DATE.format(parseIsoDate(isoDate));
-}
-
 export default function HabitsPage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6">
-      {/*
-        Everything on this page depends on the user's timezone and today's logs,
-        so the whole body streams: the shell below is prerendered, the content
-        arrives with the request. Awaiting the DB read in the page body instead
-        would block prerendering and fail `next build` under Cache Components.
-      */}
+    <PageShell>
       <Suspense fallback={<HabitsSkeleton />}>
         <HabitsContent />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }
 
 async function HabitsContent() {
   const user = await getCurrentUser();
-  const habits = await getHabitChecklist(user.id, user.timezone);
   const today = todayIso(user.timezone);
+  const habits = await getHabitChecklist(user.id, user.timezone);
 
   return (
-    <>
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">Today</h1>
-        <p className="text-muted-foreground text-sm">
-          <time dateTime={today}>{formatFriendlyDate(today)}</time> — tick off what
-          you got done.
-        </p>
-      </header>
+    <HabitDayProvider habits={habits} today={today}>
+      <ScreenHeader
+        title="Habits"
+        description={<HabitCount />}
+      />
 
+      {/*
+        The form sits below the sheet in both states: when there are no habits,
+        the sheet keeps its frame and heading and says so, and the form directly
+        under it is the action. No dashed empty box, no second empty card.
+      */}
+      <HabitSheet />
       <NewHabitForm />
-
-      {habits.length === 0 ? (
-        <EmptyHabits />
-      ) : (
-        // `today` is resolved on the server and handed down. The client clock is
-        // never consulted: a phone set to another timezone would otherwise tick
-        // off the wrong day.
-        <HabitChecklist habits={habits} today={today} />
-      )}
-    </>
-  );
-}
-
-/** First run, which is the common case — so it explains the loop, not just "empty". */
-function EmptyHabits() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>No habits yet</CardTitle>
-        <CardDescription>
-          Add one above — something small enough that you&apos;d never skip it.
-          Tick it off each day to build a streak; a single missed day won&apos;t
-          break it, but two in a row will.
-        </CardDescription>
-      </CardHeader>
-    </Card>
+    </HabitDayProvider>
   );
 }

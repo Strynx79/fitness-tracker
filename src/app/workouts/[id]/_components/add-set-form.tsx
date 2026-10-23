@@ -63,7 +63,7 @@ export function AddSetForm({ blockId }: AddSetFormProps) {
           placeholder="kg"
           aria-label="Weight in kilograms"
           defaultValue={state.values?.weightKg}
-          className="h-11 flex-1 text-base tabular-nums"
+          className="h-10 flex-1 font-mono text-sm tabular-nums"
         />
         <Input
           name="reps"
@@ -74,7 +74,7 @@ export function AddSetForm({ blockId }: AddSetFormProps) {
           placeholder="reps"
           aria-label="Reps"
           defaultValue={state.values?.reps}
-          className="h-11 flex-1 text-base tabular-nums"
+          className="h-10 flex-1 font-mono text-sm tabular-nums"
         />
         <Input
           name="rpe"
@@ -85,12 +85,12 @@ export function AddSetForm({ blockId }: AddSetFormProps) {
           placeholder="RPE"
           aria-label="RPE (optional)"
           defaultValue={state.values?.rpe}
-          className="h-11 w-20 text-base tabular-nums"
+          className="h-10 w-20 font-mono text-sm tabular-nums"
         />
         <Button
           type="submit"
           size="icon"
-          className="size-11 shrink-0"
+          className="size-10 shrink-0 rounded-md"
           disabled={pending}
           aria-label="Add set"
         >
@@ -99,7 +99,7 @@ export function AddSetForm({ blockId }: AddSetFormProps) {
       </div>
 
       {error === undefined ? null : (
-        <p role="alert" className="text-destructive text-xs">
+        <p role="alert" className="text-negative text-[13px]">
           {error}
         </p>
       )}

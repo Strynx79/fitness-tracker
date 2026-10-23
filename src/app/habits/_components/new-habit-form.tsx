@@ -4,13 +4,6 @@ import { useActionState } from "react";
 
 import { createHabit, type HabitActionState } from "@/app/habits/actions";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -43,82 +36,92 @@ export function NewHabitForm() {
   const descriptionInvalid = Boolean(state.fieldErrors?.description?.length);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Add a habit</CardTitle>
-        <CardDescription>
-          One line, ticked daily. Small enough that you&apos;d never skip it.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={formAction} className="flex flex-col gap-5">
-          <Field data-invalid={nameInvalid}>
-            <FieldLabel htmlFor="habit-name">Habit name</FieldLabel>
-            <Input
-              id="habit-name"
-              name="name"
-              type="text"
-              autoComplete="off"
-              enterKeyHint="done"
-              placeholder="Read 20m"
-              defaultValue={values.name}
-              aria-invalid={nameInvalid}
-              className="h-11 text-base"
-            />
-            <FieldError errors={toFieldErrors(state.fieldErrors?.name)} />
-          </Field>
+    <section
+      aria-labelledby="add-habit-heading"
+      className="bg-card rounded-lg p-5 sm:p-6"
+    >
+      <h2 id="add-habit-heading" className="text-base leading-snug font-medium">
+        Add a habit
+      </h2>
+      <p className="text-muted-foreground mt-1 text-[13px] leading-snug">
+        One line, ticked daily. Small enough that you&apos;d never skip it.
+      </p>
 
-          <Field data-invalid={descriptionInvalid}>
-            <FieldLabel htmlFor="habit-description">
-              Why it matters
-              <span className="text-muted-foreground font-normal">(optional)</span>
-            </FieldLabel>
-            <Input
-              id="habit-description"
-              name="description"
-              type="text"
-              autoComplete="off"
-              placeholder="Twenty minutes of a book, not a feed."
-              defaultValue={values.description}
-              aria-invalid={descriptionInvalid}
-              className="h-11 text-base"
-            />
-            <FieldError errors={toFieldErrors(state.fieldErrors?.description)} />
-          </Field>
+      <form action={formAction} className="mt-4 flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor="habit-name">Habit name</FieldLabel>
+          <Input
+            id="habit-name"
+            name="name"
+            type="text"
+            autoComplete="off"
+            enterKeyHint="next"
+            placeholder="Read 20m"
+            defaultValue={values.name}
+            aria-invalid={nameInvalid}
+            className="bg-card h-10 rounded-md px-3 text-sm"
+          />
+          <FieldError
+            errors={toFieldErrors(state.fieldErrors?.name)}
+            className="text-negative text-[13px]"
+          />
+        </Field>
 
-          <div className="flex flex-col gap-3">
-            <Button
-              type="submit"
-              size="lg"
-              disabled={pending}
-              className="h-11 w-full text-base"
-            >
-              {pending ? "Adding…" : "Add habit"}
-            </Button>
+        <Field>
+          <FieldLabel htmlFor="habit-description">
+            Why it matters
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
+          </FieldLabel>
+          <Input
+            id="habit-description"
+            name="description"
+            type="text"
+            autoComplete="off"
+            enterKeyHint="done"
+            placeholder="Twenty minutes of a book, not a feed."
+            defaultValue={values.description}
+            aria-invalid={descriptionInvalid}
+            className="bg-card h-10 rounded-md px-3 text-sm"
+          />
+          <FieldError
+            errors={toFieldErrors(state.fieldErrors?.description)}
+            className="text-negative text-[13px]"
+          />
+        </Field>
 
-            {/*
-              The single announcement for both outcomes. Nothing else here may
-              join the accessibility tree as a second live region, or the message
-              gets read out twice. Rendering it inline also keeps it working with
-              JS disabled, where the notification popover never appears.
-            */}
-            {state.status === "idle" || !state.message ? null : (
-              <p
-                role="status"
-                aria-live="polite"
-                className={cn(
-                  "text-sm",
-                  state.status === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground",
-                )}
-              >
-                {state.message}
-              </p>
+        {/*
+          The single announcement for both outcomes. Nothing else here may join
+          the accessibility tree as a second live region, or the message gets
+          read out twice. Rendering it inline also keeps it working with JS
+          disabled, where the notification popover never appears.
+        */}
+        {state.status === "idle" || !state.message ? null : (
+          <p
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "text-[13px] leading-snug",
+              state.status === "error"
+                ? "text-negative"
+                : "text-muted-foreground",
             )}
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          >
+            {state.message}
+          </p>
+        )}
+
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            disabled={pending}
+            className="h-10 rounded-md px-4 text-sm"
+          >
+            {pending ? "Adding…" : "Add habit"}
+          </Button>
+        </div>
+      </form>
+    </section>
   );
 }

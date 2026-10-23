@@ -1,93 +1,77 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * The three dashboard fallbacks.
+ * The four dashboard fallbacks.
  *
- * They are the only card content in the prerendered static shell, so each one
- * mirrors its streamed card's height closely enough that the swap-in does not
- * shift the page.
+ * Each one mirrors the block's *empty* state — the frame, the 20/24px padding,
+ * the heading line, one sentence and the 44px link row. That is the shape a
+ * fresh account actually resolves to, and it is also the shape every block
+ * keeps when its query returns nothing, so the swap-in does not move the page.
+ * No figures are sketched: a bar that pretends to be a weight is a number the
+ * user does not have.
  */
+
+function SkeletonPanel({
+  headingWidth,
+  sentenceWidth,
+  actionWidth,
+}: {
+  headingWidth: string;
+  sentenceWidth: string;
+  actionWidth: string;
+}) {
+  return (
+    <div aria-hidden className="bg-card rounded-lg p-5 sm:p-6">
+      <Skeleton className={`h-5 ${headingWidth}`} />
+
+      <div className="mt-3.5">
+        <Skeleton className={`h-4 ${sentenceWidth} max-w-full`} />
+
+        {/* The link's 44px row, without painting a block the size of a button. */}
+        <div className="mt-1.5 flex h-11 items-center">
+          <Skeleton className={`h-4 ${actionWidth}`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function TodayPlanSkeleton() {
+  return (
+    <SkeletonPanel
+      headingWidth="w-32"
+      sentenceWidth="w-40"
+      actionWidth="w-28"
+    />
+  );
+}
 
 export function WeightCardSkeleton() {
   return (
-    <Card aria-hidden>
-      <CardHeader>
-        <Skeleton className="h-5 w-16" />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <Skeleton className="h-10 w-32" />
-        <Skeleton className="h-4 w-40 max-w-full" />
-        <div className="flex items-center justify-between border-t pt-3">
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-3 w-28" />
-        </div>
-      </CardContent>
-    </Card>
+    <SkeletonPanel
+      headingWidth="w-16"
+      sentenceWidth="w-28"
+      actionWidth="w-24"
+    />
   );
 }
 
 export function HabitsCardSkeleton() {
   return (
-    <div className="flex flex-col gap-3" aria-hidden>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-4 w-20" />
-        </div>
-        <Skeleton className="h-4 w-16" />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-24" />
-          <Skeleton className="h-4 w-56 max-w-full" />
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {Array.from({ length: 3 }, (_, index) => (
-            <div key={index} className="flex items-center gap-3">
-              <Skeleton className="size-5 shrink-0" />
-              <div className="flex flex-1 flex-col gap-2">
-                <Skeleton className="h-4 w-36 max-w-full" />
-                <Skeleton className="h-3 w-48 max-w-full" />
-              </div>
-              <Skeleton className="size-8 shrink-0" />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+    <SkeletonPanel
+      headingWidth="w-32"
+      sentenceWidth="w-24"
+      actionWidth="w-20"
+    />
   );
 }
 
 export function LastWorkoutSkeleton() {
   return (
-    <div className="flex flex-col gap-3" aria-hidden>
-      <div className="flex items-center justify-between gap-2">
-        <Skeleton className="h-5 w-28" />
-        <Skeleton className="h-4 w-20" />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-baseline justify-between gap-3">
-            <Skeleton className="h-6 w-20" />
-            <Skeleton className="h-4 w-16" />
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="grid grid-cols-3 gap-2">
-            {Array.from({ length: 3 }, (_, index) => (
-              <Skeleton key={index} className="h-14 w-full" />
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            <Skeleton className="h-5 w-24" />
-            <Skeleton className="h-5 w-16" />
-            <Skeleton className="h-5 w-28" />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <SkeletonPanel
+      headingWidth="w-28"
+      sentenceWidth="w-28"
+      actionWidth="w-28"
+    />
   );
 }

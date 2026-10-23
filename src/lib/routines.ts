@@ -59,6 +59,38 @@ export async function getRoutines(userId: string): Promise<RoutineSummary[]> {
   }));
 }
 
+/**
+ * Live routines assigned to one weekday (0 = Sunday … 6 = Saturday).
+ *
+ * Same shape and ordering as `getRoutines`; the only extra predicate is the
+ * scalar-list `has`, which asks Postgres "does this routine run on day N"
+ * without fetching every routine and filtering in JS. Archived routines are
+ * excluded here for the same reason they are in `getRoutines`: archiving hides
+ * a plan without deleting the workouts it produced.
+ */
+export async function getRoutinesForWeekday(
+  userId: string,
+  weekday: number,
+): Promise<RoutineSummary[]> {
+  const rows = await prisma.routine.findMany({
+    where: { userId, archivedAt: null, weekdays: { has: weekday } },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      weekdays: true,
+      _count: { select: { exercises: true } },
+    },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    weekdays: row.weekdays,
+    exerciseCount: row._count.exercises,
+  }));
+}
+
 /** One routine with its ordered exercises, or `null` if missing/not owned. */
 export async function getRoutine(
   userId: string,

@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Trash2 } from "lucide-react";
 
 import {
   deleteRoutine,
@@ -11,13 +10,6 @@ import {
   setRoutineWeekdays,
 } from "@/app/routines/actions";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -46,9 +38,10 @@ type RoutineControlsProps = {
 /**
  * Weekly schedule + scheduling a run of the routine.
  *
- * Toggling a day writes immediately rather than behind a save button: the chips
- * ARE the schedule, and a half-set schedule left unsaved is the kind of state
- * nobody expects from a checkbox row.
+ * Toggling a day writes immediately rather than behind a save button: the day
+ * buttons ARE the schedule, and a half-set schedule left unsaved is the kind of
+ * state nobody expects from a checkbox row. Selected days step to `bg-muted`,
+ * not to the primary fill — "Start workout" is this screen's one filled action.
  */
 export function RoutineControls({
   routineId,
@@ -66,7 +59,9 @@ export function RoutineControls({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [date, setDate] = useState(defaultDate);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [scheduledSessionId, setScheduledSessionId] = useState<string | null>(null);
+  const [scheduledSessionId, setScheduledSessionId] = useState<string | null>(
+    null,
+  );
   const [schedulePending, startScheduleTransition] = useTransition();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -86,7 +81,7 @@ export function RoutineControls({
       const result = await setRoutineWeekdays(routineId, next);
 
       if (!result.ok) {
-        // Put the row back the way it was so the chips never claim a schedule
+        // Put the row back the way it was so the buttons never claim a schedule
         // the database rejected.
         setDays(previous);
         setDaysError(result.message);
@@ -126,210 +121,218 @@ export function RoutineControls({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Schedule</CardTitle>
-        <CardDescription>
-          Days this routine is planned for. Leave them all off to start it by
-          hand whenever you like.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
-        <div
-          role="group"
-          aria-label="Days of the week"
-          className="grid grid-cols-4 gap-2 sm:grid-cols-7"
+    <section
+      aria-labelledby="routine-schedule-heading"
+      className="bg-card rounded-lg p-5 sm:p-6"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h2
+          id="routine-schedule-heading"
+          className="text-base leading-snug font-medium"
         >
-          {WEEKDAYS.map((day) => {
-            const active = days.includes(day.index);
+          Schedule
+        </h2>
+        <p className="text-muted-foreground font-mono text-xs tabular-nums">
+          {days.length === 0
+            ? "None"
+            : `${days.length} day${days.length === 1 ? "" : "s"}`}
+        </p>
+      </div>
 
-            return (
+      <p className="text-muted-foreground mt-1 text-[13px] leading-snug">
+        Days this routine is planned for. Leave them all off to start it by hand
+        whenever you like.
+      </p>
+
+      <div
+        role="group"
+        aria-label="Days of the week"
+        className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7"
+      >
+        {WEEKDAYS.map((day) => {
+          const active = days.includes(day.index);
+
+          return (
+            <button
+              key={day.index}
+              type="button"
+              aria-pressed={active}
+              aria-label={day.label}
+              disabled={daysPending}
+              onClick={() => toggleDay(day.index)}
+              className={cn(
+                "focus-visible:ring-ring/50 h-11 rounded-md border text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50",
+                active
+                  ? "border-input bg-muted text-foreground"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {day.short}
+            </button>
+          );
+        })}
+      </div>
+
+      {daysError === null ? null : (
+        <p role="alert" className="text-negative mt-3 text-[13px]">
+          {daysError}
+        </p>
+      )}
+
+      <div className="border-rule mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+        <Dialog
+          open={scheduleOpen}
+          onOpenChange={(next) => {
+            setScheduleOpen(next);
+            if (!next) {
+              setScheduleError(null);
+              setScheduledSessionId(null);
+              setDate(defaultDate);
+            }
+          }}
+        >
+          <DialogTrigger
+            render={
               <Button
-                key={day.index}
-                type="button"
-                variant={active ? "default" : "outline"}
-                aria-pressed={active}
-                aria-label={day.label}
-                disabled={daysPending}
-                onClick={() => toggleDay(day.index)}
-                className="h-11"
-              >
-                {day.short}
-              </Button>
-            );
-          })}
-        </div>
-
-        {daysError === null ? null : (
-          <p role="alert" className="text-destructive text-sm">
-            {daysError}
-          </p>
-        )}
-
-        <div className="flex flex-col gap-2">
-          <Dialog
-            open={scheduleOpen}
-            onOpenChange={(next) => {
-              setScheduleOpen(next);
-              if (!next) {
-                setScheduleError(null);
-                setScheduledSessionId(null);
-                setDate(defaultDate);
-              }
-            }}
+                variant="outline"
+                className="bg-card h-10 rounded-md px-4 text-sm"
+              />
+            }
           >
-            <DialogTrigger
-              render={
-                <Button
-                  variant="outline"
-                  className="h-11 w-full gap-2"
-                />
-              }
-            >
-              <CalendarPlus aria-hidden className="size-4" />
-              Schedule a day
-            </DialogTrigger>
+            Schedule a day
+          </DialogTrigger>
 
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Schedule {routineName}</DialogTitle>
-                <DialogDescription>
-                  Creates a workout on that date with these exercises already in
-                  it.
-                </DialogDescription>
-              </DialogHeader>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Schedule {routineName}</DialogTitle>
+              <DialogDescription>
+                Creates a workout on that date with these exercises already in
+                it.
+              </DialogDescription>
+            </DialogHeader>
 
-              {scheduledSessionId === null ? (
-                <>
-                  <Field>
-                    <FieldLabel htmlFor="routine-schedule-date">Date</FieldLabel>
-                    <Input
-                      id="routine-schedule-date"
-                      type="date"
-                      value={date}
-                      min={today}
-                      onChange={(event) => setDate(event.target.value)}
-                      className="h-11 text-base"
-                    />
-                  </Field>
+            {scheduledSessionId === null ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="routine-schedule-date">Date</FieldLabel>
+                  <Input
+                    id="routine-schedule-date"
+                    type="date"
+                    value={date}
+                    min={today}
+                    onChange={(event) => setDate(event.target.value)}
+                    className="bg-card h-10 rounded-md px-3 text-sm"
+                  />
+                </Field>
 
-                  {scheduleError === null ? null : (
-                    <p role="alert" className="text-destructive text-sm">
-                      {scheduleError}
-                    </p>
-                  )}
-
-                  <DialogFooter>
-                    <DialogClose
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="lg"
-                          className="h-11"
-                          disabled={schedulePending}
-                        />
-                      }
-                    >
-                      Cancel
-                    </DialogClose>
-                    <Button
-                      size="lg"
-                      className="h-11"
-                      disabled={schedulePending || date === ""}
-                      onClick={handleSchedule}
-                    >
-                      {schedulePending ? "Scheduling…" : "Schedule"}
-                    </Button>
-                  </DialogFooter>
-                </>
-              ) : (
-                <>
-                  <p role="status" className="text-sm">
-                    Scheduled. It is waiting in your Upcoming list.
+                {scheduleError === null ? null : (
+                  <p role="alert" className="text-negative text-sm">
+                    {scheduleError}
                   </p>
+                )}
 
-                  <DialogFooter>
-                    <DialogClose
-                      render={
-                        <Button variant="ghost" size="lg" className="h-11" />
-                      }
-                    >
-                      Done
-                    </DialogClose>
-                    <Link
-                      href={`/workouts/${scheduledSessionId}`}
-                      className={cn(buttonVariants({ size: "lg" }), "h-11")}
-                    >
-                      Open workout
-                    </Link>
-                  </DialogFooter>
-                </>
-              )}
-            </DialogContent>
-          </Dialog>
-
-          <Dialog
-            open={deleteOpen}
-            onOpenChange={(next) => {
-              setDeleteOpen(next);
-              if (!next) setDeleteError(null);
-            }}
-          >
-            <DialogTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive h-11 w-full gap-2"
-                />
-              }
-            >
-              <Trash2 aria-hidden className="size-4" />
-              Delete routine
-            </DialogTrigger>
-
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Delete {routineName}?</DialogTitle>
-                <DialogDescription>
-                  The plan disappears; workouts you already started from it stay
-                  in your history.
-                </DialogDescription>
-              </DialogHeader>
-
-              {deleteError === null ? null : (
-                <p role="alert" className="text-destructive text-sm">
-                  {deleteError}
+                <DialogFooter>
+                  <DialogClose
+                    render={
+                      <Button
+                        variant="ghost"
+                        className="h-10"
+                        disabled={schedulePending}
+                      />
+                    }
+                  >
+                    Cancel
+                  </DialogClose>
+                  <Button
+                    className="h-10"
+                    disabled={schedulePending || date === ""}
+                    onClick={handleSchedule}
+                  >
+                    {schedulePending ? "Scheduling…" : "Schedule"}
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              <>
+                <p role="status" className="text-sm">
+                  Scheduled. It is waiting in your Upcoming list.
                 </p>
-              )}
 
-              <DialogFooter>
-                <DialogClose
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="lg"
-                      className="h-11"
-                      disabled={deletePending}
-                    />
-                  }
-                >
-                  Cancel
-                </DialogClose>
-                <Button
-                  variant="destructive"
-                  size="lg"
-                  className="h-11"
-                  disabled={deletePending}
-                  onClick={handleDelete}
-                >
-                  {deletePending ? "Deleting…" : "Delete routine"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </CardContent>
-    </Card>
+                <DialogFooter>
+                  <DialogClose
+                    render={<Button variant="ghost" className="h-10" />}
+                  >
+                    Done
+                  </DialogClose>
+                  <Link
+                    href={`/workouts/${scheduledSessionId}`}
+                    className={cn(buttonVariants(), "h-10")}
+                  >
+                    Open workout
+                  </Link>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={deleteOpen}
+          onOpenChange={(next) => {
+            setDeleteOpen(next);
+            if (!next) setDeleteError(null);
+          }}
+        >
+          <DialogTrigger
+            render={
+              <Button
+                variant="ghost"
+                className="text-muted-foreground hover:text-negative h-10 px-2 text-[13px] font-normal"
+              />
+            }
+          >
+            Delete routine
+          </DialogTrigger>
+
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete {routineName}?</DialogTitle>
+              <DialogDescription>
+                The plan disappears; workouts you already started from it stay in
+                your history.
+              </DialogDescription>
+            </DialogHeader>
+
+            {deleteError === null ? null : (
+              <p role="alert" className="text-negative text-sm">
+                {deleteError}
+              </p>
+            )}
+
+            <DialogFooter>
+              <DialogClose
+                render={
+                  <Button
+                    variant="ghost"
+                    className="h-10"
+                    disabled={deletePending}
+                  />
+                }
+              >
+                Cancel
+              </DialogClose>
+              <Button
+                variant="destructive"
+                className="h-10"
+                disabled={deletePending}
+                onClick={handleDelete}
+              >
+                {deletePending ? "Deleting…" : "Delete routine"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </section>
   );
 }

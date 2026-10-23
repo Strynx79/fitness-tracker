@@ -1,17 +1,9 @@
 "use client";
 
-import { useMemo, useOptimistic, useTransition } from "react";
-import { toast } from "sonner";
-
-import { toggleHabit } from "@/app/habits/actions";
+import { HabitDayProvider, useHabitDay } from "@/app/habits/_components/habit-day";
 import { HabitRow } from "@/app/habits/_components/habit-row";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import type { HabitWithStats } from "@/lib/habits";
+import { cn } from "@/lib/utils";
 
 type HabitChecklistProps = {
   habits: HabitWithStats[];
@@ -23,76 +15,86 @@ type HabitChecklistProps = {
   today: string;
 };
 
-/** One queued tick. Applied optimistically, discarded when the action settles. */
-type OptimisticToggle = { habitId: string; completed: boolean };
-
 /**
- * The checklist, and the only thing that knows a checkbox is mid-flight.
+ * The dashboard's copy of the checklist.
  *
- * The checkbox flips from `useOptimistic` on the same frame as the tap. Streaks
- * and the 7-day rate are *not* computed here: they come from the server on the
- * re-render triggered by `revalidatePath("/habits")` and `revalidatePath("/")`,
- * so a rollback has nothing to undo. If the action fails, the transition ends
- * without new props and the optimistic map falls away — the box snaps back to
- * the server's value.
+ * Kept as a self-contained client island with its original props because the
+ * Today screen mounts it inside its own panel; `/habits` uses the provider and
+ * sheet separately so the screen header's count can share the same optimistic
+ * state. `showCount` keeps the tally that the dashboard panel styles as its
+ * figure, while the habits page states it once, in the header.
  */
 export function HabitChecklist({ habits, today }: HabitChecklistProps) {
-  // Re-seeded whenever the server sends new data, so the passthrough is always
-  // the last thing the database confirmed.
-  const serverChecked = useMemo(
-    () => new Map(habits.map((habit) => [habit.id, habit.checkedToday])),
-    [habits],
+  return (
+    <HabitDayProvider habits={habits} today={today}>
+      <HabitSheet showCount />
+    </HabitDayProvider>
   );
+}
 
-  const [optimisticChecked, applyOptimisticToggle] = useOptimistic(
-    serverChecked,
-    (state, toggle: OptimisticToggle) =>
-      new Map(state).set(toggle.habitId, toggle.completed),
-  );
+type HabitSheetProps = {
+  /**
+   * The dashboard panel has no room for a second heading, so it prints the
+   * count inside the sheet instead. `/habits` keeps the count in the 880px
+   * screen header and leaves this off.
+   */
+  showCount?: boolean;
+};
 
-  const [, startTransition] = useTransition();
-
-  function handleToggle(habitId: string, completed: boolean) {
-    startTransition(async () => {
-      applyOptimisticToggle({ habitId, completed });
-
-      const result = await toggleHabit(habitId, today, completed);
-
-      // A toast, unlike the create form's inline status, because a tick has no
-      // form to attach a message to and the box has already flipped.
-      if (!result.ok) toast.error(result.message);
-    });
-  }
-
-  const checkedFor = (habit: HabitWithStats) =>
-    optimisticChecked.get(habit.id) ?? habit.checkedToday;
-
-  // Counted from the optimistic map, so the tally moves with the checkboxes.
-  const doneToday = habits.filter(checkedFor).length;
+/**
+ * Today's checklist: one sheet, four-cornered, with 48–60px ruled rows.
+ *
+ * The rows are the screen. Everything around the sheet — the header count and
+ * the add form below — exists to keep the list honest and refill it; there is
+ * no chart and no second list.
+ */
+export function HabitSheet({ showCount = false }: HabitSheetProps) {
+  const { habits, doneToday, total } = useHabitDay();
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Checklist</CardTitle>
-        <CardDescription>
-          <span className="tabular-nums">
-            {doneToday} of {habits.length}
-          </span>{" "}
-          done today. One missed day won&apos;t break a streak — two in a row
-          will.
-        </CardDescription>
-      </CardHeader>
+    <div className="bg-card rounded-lg">
+      <div
+        className={cn(
+          "border-rule flex flex-col gap-1 border-b px-5 pb-3 sm:px-6",
+          // The Today panel supplies its own 14px gap above the block; on this
+          // screen the sheet has to make that space itself.
+          showCount ? "pt-0" : "pt-4",
+        )}
+      >
+        {/*
+          `data-slot` lets the Today screen's wrapper hide this heading (its
+          DashboardPanel already names the block) without a second variant of
+          the sheet existing.
+        */}
+        <h2
+          data-slot="card-title"
+          className="text-base leading-snug font-medium"
+        >
+          Today
+        </h2>
 
-      <ul className="divide-y border-t">
-        {habits.map((habit) => (
-          <HabitRow
-            key={habit.id}
-            habit={habit}
-            checked={checkedFor(habit)}
-            onToggle={handleToggle}
-          />
-        ))}
-      </ul>
-    </Card>
+        {showCount ? (
+          <p className="text-muted-foreground text-[13px] leading-snug">
+            <span className="font-mono tabular-nums">
+              {doneToday} of {total}
+            </span>{" "}
+            done today. One missed day won&apos;t break a streak — two in a row
+            will.
+          </p>
+        ) : null}
+      </div>
+
+      {habits.length === 0 ? (
+        <p className="text-muted-foreground px-5 py-5 text-sm sm:px-6">
+          No habits yet.
+        </p>
+      ) : (
+        <ul className="divide-rule divide-y">
+          {habits.map((habit) => (
+            <HabitRow key={habit.id} habit={habit} />
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Trash2 } from "lucide-react";
 
 import { deleteRoutineExercise } from "@/app/routines/actions";
 import { Button } from "@/components/ui/button";
@@ -16,23 +15,21 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-type RemoveRoutineExerciseButtonProps = {
+type RoutineExerciseRowProps = {
   id: string;
   name: string;
 };
 
 /**
- * The remove control for one exercise in a routine.
+ * One exercise's remove control.
  *
- * Deliberately ONLY the button and its dialog: the row itself (name, link,
- * divider) belongs to the page. Rendering the label here as well is what made
- * two exercises overlap on a phone — two `flex-1` siblings each holding the same
- * string.
+ * The action is text in the ledger's fixed trailing column, not an icon: the row
+ * already carries the exercise name and its target, and a trash glyph at 13px is
+ * harder to hit than a word. No confirmation dialog: nothing has been logged
+ * against a routine exercise, so removing it is one tap and one more tap puts it
+ * back.
  */
-export function RemoveRoutineExerciseButton({
-  id,
-  name,
-}: RemoveRoutineExerciseButtonProps) {
+export function RoutineExerciseRow({ id, name }: RoutineExerciseRowProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -46,51 +43,61 @@ export function RemoveRoutineExerciseButton({
   }
 
   return (
-    <Dialog>
-      <DialogTrigger
-        aria-label={`Remove ${name}`}
-        render={
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground/60 hover:text-destructive size-11 shrink-0"
-          />
-        }
-      >
-        <Trash2 aria-hidden />
-      </DialogTrigger>
+    <div className="flex flex-col items-end gap-1">
+      <Dialog>
+        <DialogTrigger
+          aria-label={`Remove ${name}`}
+          render={
+            <Button
+              variant="ghost"
+              className="text-muted-foreground hover:text-negative h-11 px-2 text-[13px] font-normal"
+            />
+          }
+        >
+          Remove
+        </DialogTrigger>
 
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Remove {name}?</DialogTitle>
-          <DialogDescription>
-            This only changes the plan. Sessions you already did are untouched.
-          </DialogDescription>
-        </DialogHeader>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {name}?</DialogTitle>
+            <DialogDescription>
+              This only changes the plan. Sessions you already did are untouched.
+            </DialogDescription>
+          </DialogHeader>
 
-        {error === null ? null : (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        )}
+          {error === null ? null : (
+            <p role="alert" className="text-negative text-sm">
+              {error}
+            </p>
+          )}
 
-        <DialogFooter>
-          <DialogClose
-            render={<Button variant="ghost" size="lg" className="h-11" />}
-          >
-            Cancel
-          </DialogClose>
-          <Button
-            variant="destructive"
-            size="lg"
-            className="h-11"
-            disabled={pending}
-            onClick={handleRemove}
-          >
-            {pending ? "Removing…" : "Remove"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <DialogClose
+              render={<Button variant="ghost" size="lg" className="h-10" />}
+            >
+              Cancel
+            </DialogClose>
+            <Button
+              variant="destructive"
+              size="lg"
+              className="h-10"
+              disabled={pending}
+              onClick={handleRemove}
+            >
+              {pending ? "Removing…" : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {error === null ? null : (
+        <span
+          role="alert"
+          className="text-negative max-w-[20ch] text-right text-xs leading-snug"
+        >
+          {error}
+        </span>
+      )}
+    </div>
   );
 }

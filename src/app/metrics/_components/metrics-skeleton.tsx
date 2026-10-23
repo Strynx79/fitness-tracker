@@ -1,55 +1,42 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
-/** Mirrors the streamed content's card stack so the swap-in doesn't jump. */
+/**
+ * The streaming fallback.
+ *
+ * It mirrors the resolved layout — header, KPI strip, the two-thirds chart with
+ * the form beside it, then the table — so the swap-in does not move the page.
+ * The skeleton bars are loading chrome, not decoration: every block the real
+ * screen draws has a placeholder of the same height.
+ */
 export function MetricsSkeleton() {
   return (
-    <div className="flex flex-col gap-4" aria-hidden>
-      <Card>
-        <CardContent className="flex items-center gap-2">
-          <Skeleton className="size-11 shrink-0" />
-          <Skeleton className="h-11 flex-1" />
-          <Skeleton className="size-11 shrink-0" />
-        </CardContent>
-      </Card>
+    <div aria-hidden className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-2xl font-semibold tracking-tight">Metrics</h1>
+          <Skeleton className="h-4 w-44" />
+        </div>
+        <Skeleton className="h-10 w-56 rounded-md" />
+      </div>
 
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-4 w-64 max-w-full" />
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <div className="grid gap-5 sm:grid-cols-3">
-            <Skeleton className="h-11 w-full" />
-            <Skeleton className="h-11 w-full" />
-            <Skeleton className="h-11 w-full" />
+      <div className="bg-card divide-rule mt-9 grid grid-cols-1 divide-y rounded-lg sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div
+            key={index}
+            className="flex flex-col gap-2 px-5 py-4 sm:px-6 sm:py-5"
+          >
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-7 w-24" />
           </div>
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-11 w-full" />
-        </CardContent>
-      </Card>
+        ))}
+      </div>
 
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-4 w-72 max-w-full" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-[280px] w-full" />
-        </CardContent>
-      </Card>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Skeleton className="bg-card h-[382px] rounded-lg lg:col-span-2" />
+        <Skeleton className="bg-card h-[460px] rounded-lg" />
+      </div>
 
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-24" />
-          <Skeleton className="h-4 w-56 max-w-full" />
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {Array.from({ length: 6 }, (_, index) => (
-            <Skeleton key={index} className="h-8 w-full" />
-          ))}
-        </CardContent>
-      </Card>
+      <Skeleton className="bg-card h-[340px] rounded-lg" />
     </div>
   );
 }

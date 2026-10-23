@@ -1,14 +1,12 @@
-import Link from "next/link";
-import { ArrowDown, ArrowUp, Minus, Scale } from "lucide-react";
-
+import { DashboardPanel } from "@/app/_components/dashboard-panel";
 import { EmptyState } from "@/app/_components/empty-state";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { getWeightSummary } from "@/lib/daily-metrics";
+import { parseIsoDate } from "@/lib/date";
 import { formatShortDate } from "@/lib/workout-format";
 
 /**
- * Weights are stored to two decimals, but the card is a headline, not a table.
+ * Weights are stored to two decimals, but the panel is a headline, not a table.
  * `maximumFractionDigits` drops trailing zeros, so 79.80 renders as "79.8".
  */
 const KG = new Intl.NumberFormat("en-US", {
@@ -37,23 +35,35 @@ function formatKg(value: number): string {
  * Distance from goal, phrased by direction. `null` is a missing goal, never a
  * zero delta — a user without a target should not read "at goal".
  */
-function describeGoal(deltaKg: number | null, goalKg: number | null): string {
-  if (goalKg === null || deltaKg === null) return "No goal set";
-  if (Math.abs(deltaKg) < NEUTRAL_KG) return "at goal";
+function GoalLine({
+  deltaKg,
+  goalKg,
+}: {
+  deltaKg: number | null;
+  goalKg: number | null;
+}) {
+  if (goalKg === null || deltaKg === null) {
+    return <p className="text-muted-foreground text-sm">No goal set</p>;
+  }
 
-  return `${formatKg(Math.abs(deltaKg))} kg ${
-    deltaKg > 0 ? "above" : "below"
-  } goal`;
+  if (Math.abs(deltaKg) < NEUTRAL_KG) {
+    return <p className="text-sm">At goal</p>;
+  }
+
+  return (
+    <p className="text-sm">
+      <span className="font-mono tabular-nums">{formatKg(Math.abs(deltaKg))}</span>
+      {` kg ${deltaKg > 0 ? "above" : "below"} goal`}
+    </p>
+  );
 }
 
 /**
- * Direction only — down is not automatically good, so the arrow and number are
- * neutral rather than green/red.
- *
- * The baseline can be much older than seven days (the data layer looks back to
- * the closest earlier reading), so the label names the actual baseline date
- * instead of claiming a week. `null` means there is no comparison at all, which
- * is not the same as "no change".
+ * Direction only — down is not automatically good, so the number stays ink
+ * rather than green/red. The baseline can be much older than seven days (the
+ * data layer looks back to the closest earlier reading), so the label names
+ * the actual baseline date instead of claiming a week. `null` means there is
+ * no comparison at all, which is not the same as "no change".
  */
 function WeeklyChange({
   changeKg,
@@ -63,37 +73,37 @@ function WeeklyChange({
   baselineDate: string | null;
 }) {
   if (changeKg === null || baselineDate === null) {
-    return (
-      <span className="text-muted-foreground inline-flex items-center gap-1">
-        <Minus aria-hidden className="size-3.5" />
-        No trend yet
-      </span>
-    );
+    return <span>No trend yet</span>;
   }
 
-  const since = TREND_DATE.format(new Date(baselineDate));
+  const since = (
+    <time dateTime={baselineDate} className="font-mono tabular-nums">
+      {TREND_DATE.format(parseIsoDate(baselineDate))}
+    </time>
+  );
 
   if (Math.abs(changeKg) < NEUTRAL_KG) {
-    return (
-      <span className="text-muted-foreground inline-flex items-center gap-1">
-        <Minus aria-hidden className="size-3.5" />
-        <span>{`No change since ${since}`}</span>
-      </span>
-    );
+    return <span>No change since {since}</span>;
   }
 
-  const Icon = changeKg < 0 ? ArrowDown : ArrowUp;
-
   return (
-    <span className="inline-flex items-center gap-1">
-      <Icon aria-hidden className="size-3.5" />
-      <span className="text-foreground font-medium tabular-nums">
-        {`${formatKg(Math.abs(changeKg))} kg since ${since}`}
-      </span>
+    <span>
+      <span className="text-foreground font-mono tabular-nums">
+        {`${changeKg > 0 ? "+" : "−"}${formatKg(Math.abs(changeKg))} kg`}
+      </span>{" "}
+      since {since}
     </span>
   );
 }
 
+/**
+ * The screen's answer figure.
+ *
+ * When a weigh-in exists the number is the one coloured thing on the page: it
+ * answers "what is my state today?" and the blue belongs to data, never chrome.
+ * With no weigh-in nothing is coloured and the block keeps its frame, heading
+ * and one route in (`/metrics`).
+ */
 export async function WeightCard() {
   const user = await getCurrentUser();
   const summary = await getWeightSummary(user.id);
@@ -102,75 +112,51 @@ export async function WeightCard() {
 
   if (latest === null) {
     return (
-      <EmptyState
-        icon={Scale}
-        title="No weigh-in yet"
-        description="Log your weight in Daily metrics and your trend will show up here."
-        action={{ href: "/metrics", label: "Log a weigh-in" }}
-      />
+      <DashboardPanel title="Weight" headingId="weight-heading">
+        <EmptyState
+          description="No weigh-in yet."
+          action={{ href: "/metrics", label: "Log a weigh-in" }}
+        />
+      </DashboardPanel>
     );
   }
 
   return (
-    <section aria-labelledby="weight-heading">
-      <Link
-        href="/metrics"
-        className="rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-      >
-        <Card className="transition-colors hover:bg-muted/40">
-          <CardHeader>
-            {/*
-              A real heading (CardTitle is a div), so the card is announced in a
-              heading list. The link's name now comes from its content.
-            */}
-            <h2
-              id="weight-heading"
-              className="font-heading text-base leading-snug font-medium"
-            >
-              Weight
-            </h2>
-          </CardHeader>
+    <DashboardPanel
+      title="Weight"
+      headingId="weight-heading"
+      action={{ href: "/metrics", label: "Metrics" }}
+    >
+      <div className="flex items-baseline gap-1.5">
+        <p className="text-data font-mono text-3xl leading-none font-medium tabular-nums">
+          {formatKg(latest.weightKg)}
+        </p>
+        <span className="text-muted-foreground text-xs">kg</span>
+      </div>
 
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-end gap-2">
-              <span className="text-4xl leading-none font-semibold tracking-tight tabular-nums">
-                {formatKg(latest.weightKg)}
-              </span>
-              <span className="text-muted-foreground pb-0.5 text-sm">kg</span>
-            </div>
+      <div className="mt-2">
+        <GoalLine deltaKg={summary.deltaKg} goalKg={goalKg} />
+      </div>
 
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-sm font-medium">
-                {describeGoal(summary.deltaKg, goalKg)}
-              </span>
-              {goalKg === null ? null : (
-                <span className="text-muted-foreground text-sm">
-                  Goal {formatKg(goalKg)} kg
-                </span>
-              )}
-            </div>
+      {/*
+        `latest.date` is a date-only value, so it is formatted against the
+        UTC-midnight instant with `timeZone: "UTC"` — the same convention as the
+        metrics table. Formatting it in the user's zone would slide the day
+        backwards for anyone west of UTC.
+      */}
+      <div className="border-rule text-muted-foreground mt-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t pt-3 text-[13px]">
+        <span>
+          Weighed{" "}
+          <time dateTime={latest.date} className="text-foreground font-mono tabular-nums">
+            {formatShortDate(latest.date, "UTC")}
+          </time>
+        </span>
 
-            <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t pt-3 text-xs">
-              {/*
-                `latest.date` is a date-only value, so it is formatted against the
-                UTC-midnight instant with `timeZone: "UTC"` — the same convention
-                as the metrics table. Formatting it in the user's zone would slide
-                the day backwards for anyone west of UTC.
-              */}
-              <span>
-                Weighed{" "}
-                <time dateTime={latest.date} className="text-foreground font-medium">
-                  {formatShortDate(latest.date, "UTC")}
-                </time>
-              </span>
-              <WeeklyChange
-                changeKg={summary.change7dKg}
-                baselineDate={summary.baseline?.date ?? null}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </Link>
-    </section>
+        <WeeklyChange
+          changeKg={summary.change7dKg}
+          baselineDate={summary.baseline?.date ?? null}
+        />
+      </div>
+    </DashboardPanel>
   );
 }
